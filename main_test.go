@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,5 +131,108 @@ func TestServeWishlist(t *testing.T) {
 	groups, _ := got[0]["groups"].([]any)
 	if len(groups) != 1 {
 		t.Fatalf("groups = %v, want the known Emp group inline", got[0]["groups"])
+	}
+}
+
+func sendTestServers(t *testing.T, wishlistScenes []map[string]any) (transURL, xbvrURL string) {
+	t.Helper()
+	trans := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result":    "success",
+			"arguments": map[string]any{"torrent-added": map[string]any{"name": "Scene 8K", "id": 7}},
+		})
+	}))
+	t.Cleanup(trans.Close)
+	xbvrSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": len(wishlistScenes),
+			"scenes":  wishlistScenes,
+		})
+	}))
+	t.Cleanup(xbvrSrv.Close)
+	return trans.URL, xbvrSrv.URL
+}
+
+func seedSendItem(t *testing.T, db *store.DB) {
+	t.Helper()
+	_, err := db.UpsertItem(store.Item{
+		GroupID:      "1154515",
+		Title:        "FuckPassVR - Rainy City Rendezvous - Mia James (2026.08.28) (Oculus 8K)",
+		Tags:         []string{"mia.james", "3840p", "virtual.reality"},
+		EnclosureURL: "https://example.invalid/torrents.php?action=download&id=1",
+		PubDate:      time.Now().UTC(), FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func postSend(t *testing.T, cfg *config.Config, db *store.DB) (int, map[string]any) {
+	t.Helper()
+	body := `{"group_id":"1154515"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/send", strings.NewReader(body))
+	serveSend(cfg, db, rec, req)
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	return rec.Code, got
+}
+
+// A wishlist grab must leave a pending row so the completion poller can
+// link the finished file into its XBVR scene.
+func TestServeSendTracksWishlistPending(t *testing.T) {
+	transURL, xbvrURL := sendTestServers(t, []map[string]any{{
+		"scene_id": "fp-1", "title": "Rainy City Rendezvous", "site": "FuckPassVR",
+	}})
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	seedSendItem(t, db)
+
+	cfg := &config.Config{TransmissionURL: transURL, XBVRURL: xbvrURL}
+	code, got := postSend(t, cfg, db)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %v", code, got)
+	}
+	if got["wishlist_scene"] != "fp-1" {
+		t.Errorf("wishlist_scene = %v, want fp-1", got["wishlist_scene"])
+	}
+	pend, err := db.ListActivePending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pend) != 1 || pend[0].SceneID != "fp-1" || pend[0].TransmissionID != 7 {
+		t.Fatalf("pending = %+v, want one fp-1 row with torrent 7", pend)
+	}
+}
+
+// A non-wishlist send stays fire-and-forget: no pending row.
+func TestServeSendNoPendingWithoutWishlistMatch(t *testing.T) {
+	transURL, xbvrURL := sendTestServers(t, nil)
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	seedSendItem(t, db)
+
+	cfg := &config.Config{TransmissionURL: transURL, XBVRURL: xbvrURL}
+	code, got := postSend(t, cfg, db)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %v", code, got)
+	}
+	if _, ok := got["wishlist_scene"]; ok {
+		t.Errorf("wishlist_scene present = %v, want absent", got)
+	}
+	pend, err := db.ListActivePending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pend) != 0 {
+		t.Fatalf("pending = %+v, want none", pend)
 	}
 }

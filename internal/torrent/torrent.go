@@ -68,11 +68,28 @@ type rpcResponse struct {
 			Name string `json:"name"`
 			ID   int    `json:"id"`
 		} `json:"torrent-duplicate"`
+		Torrents []TorrentStatus `json:"torrents"`
 	} `json:"arguments"`
 }
 
-func (t *Transmission) call(args map[string]any) (*rpcResponse, error) {
-	payload, _ := json.Marshal(rpcRequest{Method: "torrent-add", Arguments: args})
+// TorrentStatus is the subset of torrent-get fields Wankarr polls to
+// detect completion. Status follows Transmission's codes (4 =
+// downloading, 6 = seeding); Done is true for a finished torrent.
+type TorrentStatus struct {
+	ID          int     `json:"id"`
+	Name        string  `json:"name"`
+	PercentDone float64 `json:"percentDone"`
+	Status      int     `json:"status"`
+	IsFinished  bool    `json:"isFinished"`
+}
+
+// Done reports a completed torrent: fully downloaded or seeding.
+func (s TorrentStatus) Done() bool {
+	return s.IsFinished || s.PercentDone >= 1 || s.Status == 6
+}
+
+func (t *Transmission) call(method string, args map[string]any) (*rpcResponse, error) {
+	payload, _ := json.Marshal(rpcRequest{Method: method, Arguments: args})
 	for attempt := 0; attempt < 2; attempt++ {
 		req, err := http.NewRequest(http.MethodPost, t.rpcURL, bytes.NewReader(payload))
 		if err != nil {
@@ -116,20 +133,21 @@ func (t *Transmission) call(args map[string]any) (*rpcResponse, error) {
 	return nil, fmt.Errorf("transmission: session handshake failed")
 }
 
-// AddURL queues the torrent at url.
-func (t *Transmission) AddURL(url string) (string, error) {
+// AddURL queues the torrent at url. Returns the client-side name and the
+// Transmission torrent ID (for completion polling).
+func (t *Transmission) AddURL(url string) (name string, id int, err error) {
 	args := map[string]any{"filename": url}
 	if t.downloadDir != "" {
 		args["download-dir"] = t.downloadDir
 	}
-	out, err := t.call(args)
+	out, err := t.call("torrent-add", args)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if out.Arguments.TorrentDuplicate.Name != "" {
-		return out.Arguments.TorrentDuplicate.Name + " (already queued)", nil
+		return out.Arguments.TorrentDuplicate.Name + " (already queued)", out.Arguments.TorrentDuplicate.ID, nil
 	}
-	return out.Arguments.TorrentAdded.Name, nil
+	return out.Arguments.TorrentAdded.Name, out.Arguments.TorrentAdded.ID, nil
 }
 
 // AddFile queues raw .torrent bytes.
@@ -140,7 +158,7 @@ func (t *Transmission) AddFile(filename string, data []byte) (string, error) {
 	if t.downloadDir != "" {
 		args["download-dir"] = t.downloadDir
 	}
-	out, err := t.call(args)
+	out, err := t.call("torrent-add", args)
 	if err != nil {
 		return "", err
 	}
@@ -148,4 +166,23 @@ func (t *Transmission) AddFile(filename string, data []byte) (string, error) {
 		return out.Arguments.TorrentDuplicate.Name + " (already queued)", nil
 	}
 	return out.Arguments.TorrentAdded.Name, nil
+}
+
+// ErrTorrentNotFound is returned by StatusOf when Transmission knows no
+// torrent with that ID (removed client-side, or a stale pending row).
+var ErrTorrentNotFound = fmt.Errorf("transmission: no such torrent")
+
+// StatusOf reports one torrent's progress for completion polling.
+func (t *Transmission) StatusOf(id int) (TorrentStatus, error) {
+	out, err := t.call("torrent-get", map[string]any{
+		"ids":    []int{id},
+		"fields": []string{"id", "name", "percentDone", "status", "isFinished"},
+	})
+	if err != nil {
+		return TorrentStatus{}, err
+	}
+	if len(out.Arguments.Torrents) == 0 {
+		return TorrentStatus{}, ErrTorrentNotFound
+	}
+	return out.Arguments.Torrents[0], nil
 }

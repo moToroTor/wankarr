@@ -58,6 +58,12 @@ designed accordingly:
   credential-bearing enclosure URL server-side and calls Transmission
   `torrent-add` (with `download-dir` when `TRANSMISSION_DOWNLOAD_DIR` is
   set). Only the group ID is logged.
+- **Link-back**: sends that match a wishlist scene are tracked; every 5
+  minutes Wankarr polls Transmission, and once the torrent finishes it
+  calls XBVR's `rescan` task and links the new file to the scene
+  (`files/match` when auto-match misses). Non-wishlist sends stay
+  fire-and-forget. Point `TRANSMISSION_DOWNLOAD_DIR` inside a path XBVR
+  watches, or the rescan will never see the file.
 
 ## Secret hygiene
 

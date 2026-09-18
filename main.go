@@ -8,6 +8,7 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -57,6 +58,15 @@ func main() {
 		for range time.Tick(cfg.PollInterval) {
 			poll(cfg, db, xc, httpClient)
 			matchAll(db, xc)
+		}
+	}()
+
+	// Completion watch: wishlist grabs are linked into their XBVR scene
+	// once Transmission finishes downloading them.
+	go func() {
+		checkCompletions(cfg, db)
+		for range time.Tick(completionInterval) {
+			checkCompletions(cfg, db)
 		}
 	}()
 
@@ -442,14 +452,147 @@ func serveSend(cfg *config.Config, db *store.DB, w http.ResponseWriter, r *http.
 		return
 	}
 	tc := torrent.NewTransmissionWithDir(cfg.TransmissionURL, cfg.TransmissionUser, cfg.TransmissionPass, cfg.TransmissionDownloadDir)
-	name, err := tc.AddURL(dl)
+	name, tid, err := tc.AddURL(dl)
 	if err != nil {
 		log.Printf("send group %s: %v", req.GroupID, err)
 		http.Error(w, "download client failed", http.StatusBadGateway)
 		return
 	}
 	log.Printf("send group %s: queued %q", req.GroupID, name)
-	writeJSON(w, map[string]any{"queued": name})
+	resp := map[string]any{"queued": name}
+	// Wishlist grabs get completion tracking: once Transmission
+	// finishes, the file is linked into its XBVR scene. Plain
+	// (non-wishlist) sends stay fire-and-forget.
+	if sceneID, sceneTitle := wishlistSceneForGroup(db, xbvr.NewClient(cfg.XBVRURL), req.GroupID); sceneID != "" {
+		if _, err := db.AddPending(tid, name, req.GroupID, sceneID, sceneTitle); err != nil {
+			log.Printf("send group %s: pending track: %v", req.GroupID, err)
+		} else {
+			log.Printf("send group %s: tracking completion for scene %s", req.GroupID, sceneID)
+			resp["wishlist_scene"] = sceneID
+		}
+	}
+	writeJSON(w, resp)
+}
+
+// wishlistSceneForGroup returns the best wishlist scene for a group ID
+// (match score >= 0.6), or "" when the group is not a wishlist grab or
+// XBVR is unreachable. Best-effort: never fails the send.
+func wishlistSceneForGroup(db *store.DB, xc *xbvr.Client, groupID string) (string, string) {
+	it, err := db.GetItem(groupID)
+	if err != nil {
+		return "", ""
+	}
+	wishlist, err := xc.ListWishlist()
+	if err != nil {
+		log.Printf("send group %s: wishlist unavailable: %v", groupID, err)
+		return "", ""
+	}
+	key := emp.GroupKey(it.Title)
+	bestID, bestTitle, best := "", "", 0.0
+	for _, want := range wishlist {
+		if s := match.Score(key, want); s >= 0.6 && s > best {
+			bestID, bestTitle, best = want.SceneID, want.Title, s
+		}
+	}
+	return bestID, bestTitle
+}
+
+// Completion polling for wishlist grabs. Runs every few minutes:
+//
+//	downloading --torrent-get--> finished? --rescan--> downloaded
+//	downloaded  --files/list--> found? --match if needed--> linked
+//
+// A torrent Transmission no longer knows is marked lost. Rescans are
+// capped (XBVR scans are expensive) with a cooldown between retries.
+const (
+	completionInterval = 5 * time.Minute
+	maxLinkRescans     = 3
+	rescanCooldown     = 15 * time.Minute
+)
+
+func checkCompletions(cfg *config.Config, db *store.DB) {
+	pend, err := db.ListActivePending()
+	if err != nil {
+		log.Printf("completions: %v", err)
+		return
+	}
+	if len(pend) == 0 {
+		return
+	}
+	tc := torrent.NewTransmissionWithDir(cfg.TransmissionURL, cfg.TransmissionUser, cfg.TransmissionPass, cfg.TransmissionDownloadDir)
+	xc := xbvr.NewClient(cfg.XBVRURL)
+	for _, p := range pend {
+		switch p.Status {
+		case "downloading":
+			checkDownload(db, tc, xc, p)
+		case "downloaded":
+			checkLink(db, xc, p)
+		default:
+			log.Printf("completions: pending %d in unexpected state %q", p.ID, p.Status)
+		}
+	}
+}
+
+// checkDownload advances a pending row once its torrent finishes.
+func checkDownload(db *store.DB, tc *torrent.Transmission, xc *xbvr.Client, p store.PendingLink) {
+	st, err := tc.StatusOf(p.TransmissionID)
+	if err != nil {
+		if errors.Is(err, torrent.ErrTorrentNotFound) {
+			log.Printf("completions: pending %d: torrent gone from client, giving up", p.ID)
+			_ = db.SetPendingStatus(p.ID, "lost")
+			return
+		}
+		log.Printf("completions: pending %d: status: %v", p.ID, err)
+		return
+	}
+	if !st.Done() {
+		return
+	}
+	if err := xc.Rescan(); err != nil {
+		log.Printf("completions: pending %d: rescan: %v", p.ID, err)
+		return
+	}
+	if err := db.NoteRescan(p.ID); err != nil {
+		log.Printf("completions: pending %d: %v", p.ID, err)
+		return
+	}
+	if err := db.SetPendingStatus(p.ID, "downloaded"); err != nil {
+		log.Printf("completions: pending %d: %v", p.ID, err)
+		return
+	}
+	log.Printf("completions: pending %d (%q): downloaded, rescan queued", p.ID, p.TorrentName)
+}
+
+// checkLink looks for the finished file in XBVR and links it to the
+// wishlist scene when the rescan's auto-match did not.
+func checkLink(db *store.DB, xc *xbvr.Client, p store.PendingLink) {
+	f, found, err := xc.FindFile(p.TorrentName)
+	if err != nil {
+		log.Printf("completions: pending %d: find file: %v", p.ID, err)
+		return
+	}
+	if !found {
+		if p.Rescans < maxLinkRescans && time.Since(p.RescanAt) > rescanCooldown {
+			if err := xc.Rescan(); err != nil {
+				log.Printf("completions: pending %d: rescan retry: %v", p.ID, err)
+				return
+			}
+			_ = db.NoteRescan(p.ID)
+			log.Printf("completions: pending %d (%q): still unseen, rescan %d queued",
+				p.ID, p.TorrentName, p.Rescans+1)
+		}
+		return
+	}
+	if f.SceneID == 0 {
+		if err := xc.MatchFile(p.SceneID, f.ID); err != nil {
+			log.Printf("completions: pending %d: match file %d: %v", p.ID, f.ID, err)
+			return
+		}
+		log.Printf("completions: pending %d: linked file %d to scene %s", p.ID, f.ID, p.SceneID)
+	} else {
+		log.Printf("completions: pending %d: file %d already linked, done", p.ID, f.ID)
+	}
+	_ = db.SetPendingStatus(p.ID, "linked")
 }
 
 // serveWishlist renders the XBVR wishlist itself — artwork and details

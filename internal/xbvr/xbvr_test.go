@@ -69,3 +69,69 @@ func TestServerError(t *testing.T) {
 		t.Error("expected error on 500, got nil")
 	}
 }
+
+func TestRescanQueuesTask(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+	}))
+	t.Cleanup(srv.Close)
+	if err := NewClient(srv.URL).Rescan(); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/api/task/rescan" {
+		t.Errorf("request = %s %s, want GET /api/task/rescan", gotMethod, gotPath)
+	}
+}
+
+func TestFindFilePrefersUnmatched(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/files/list" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]File{
+			{ID: 1, SceneID: 9, Filename: "Scene 8K.mp4"},
+			{ID: 2, SceneID: 0, Filename: "Scene 8K (1).mp4"},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	f, found, err := NewClient(srv.URL).FindFile("Scene 8K")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || f.ID != 2 {
+		t.Errorf("file = %+v found=%v, want unmatched ID 2", f, found)
+	}
+}
+
+func TestFindFileNone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]File{})
+	}))
+	t.Cleanup(srv.Close)
+	if _, found, err := NewClient(srv.URL).FindFile("nope"); err != nil || found {
+		t.Errorf("found=%v err=%v, want not found", found, err)
+	}
+}
+
+func TestMatchFilePayload(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/files/match" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	}))
+	t.Cleanup(srv.Close)
+	if err := NewClient(srv.URL).MatchFile("fuckpassvr-001", 2); err != nil {
+		t.Fatal(err)
+	}
+	if got["scene_id"] != "fuckpassvr-001" || got["file_id"] != float64(2) {
+		t.Errorf("payload = %v, want scene_id + file_id", got)
+	}
+}

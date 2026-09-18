@@ -75,6 +75,24 @@ CREATE TABLE IF NOT EXISTS kv (
 	value      TEXT NOT NULL DEFAULT '',
 	updated_at TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
+
+-- Wishlist grabs awaiting XBVR linkage: one row per Transmission send
+-- that matched a wishlist scene. The completion poller advances status
+-- downloading -> downloaded -> linked (or lost when Transmission no
+-- longer knows the torrent).
+CREATE TABLE IF NOT EXISTS pending_links (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	transmission_id INTEGER NOT NULL,
+	torrent_name    TEXT NOT NULL DEFAULT '',
+	group_id        TEXT NOT NULL,
+	scene_id        TEXT NOT NULL,
+	scene_title     TEXT NOT NULL DEFAULT '',
+	status          TEXT NOT NULL DEFAULT 'downloading',
+	rescans         INTEGER NOT NULL DEFAULT 0,
+	rescan_at       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+	created_at      TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pending_links_status ON pending_links(status);
 `
 
 // DB wraps the SQLite handle.
@@ -289,4 +307,90 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// GetItem returns one stored item by group ID (without the
+// credential-bearing enclosure URL).
+func (d *DB) GetItem(groupID string) (Item, error) {
+	rows, err := d.sql.Query(`
+SELECT group_id, title, category, category_id, pub_date, tags, size_bytes,
+	seeders, freeleech, cover_url, filename, infohash, details_url, source, fetched_at
+FROM emp_items WHERE group_id = ?`, groupID)
+	if err != nil {
+		return Item{}, err
+	}
+	defer rows.Close()
+	items, err := scanItems(rows)
+	if err != nil {
+		return Item{}, err
+	}
+	if len(items) == 0 {
+		return Item{}, sql.ErrNoRows
+	}
+	return items[0], nil
+}
+
+// PendingLink tracks a wishlist grab from Transmission queueing until it
+// is linked to its XBVR scene.
+type PendingLink struct {
+	ID             int64
+	TransmissionID int
+	TorrentName    string
+	GroupID        string
+	SceneID        string
+	SceneTitle     string
+	Status         string // downloading, downloaded, linked, lost
+	Rescans        int
+	RescanAt       time.Time
+	CreatedAt      time.Time
+}
+
+// AddPending records a queued wishlist grab for completion tracking.
+func (d *DB) AddPending(transmissionID int, torrentName, groupID, sceneID, sceneTitle string) (int64, error) {
+	res, err := d.sql.Exec(`
+INSERT INTO pending_links (transmission_id, torrent_name, group_id, scene_id, scene_title)
+VALUES (?, ?, ?, ?, ?)`,
+		transmissionID, torrentName, groupID, sceneID, sceneTitle)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// ListActivePending returns links still needing work (not linked/lost).
+func (d *DB) ListActivePending() ([]PendingLink, error) {
+	rows, err := d.sql.Query(`
+SELECT id, transmission_id, torrent_name, group_id, scene_id, scene_title,
+	status, rescans, rescan_at, created_at
+FROM pending_links WHERE status NOT IN ('linked', 'lost') ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PendingLink
+	for rows.Next() {
+		var p PendingLink
+		var rescanAt, created string
+		if err := rows.Scan(&p.ID, &p.TransmissionID, &p.TorrentName, &p.GroupID,
+			&p.SceneID, &p.SceneTitle, &p.Status, &p.Rescans, &rescanAt, &created); err != nil {
+			return nil, err
+		}
+		p.RescanAt, _ = time.Parse(time.RFC3339, rescanAt)
+		p.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// SetPendingStatus advances a link's lifecycle state.
+func (d *DB) SetPendingStatus(id int64, status string) error {
+	_, err := d.sql.Exec(`UPDATE pending_links SET status = ? WHERE id = ?`, status, id)
+	return err
+}
+
+// NoteRescan records that an XBVR rescan was requested for a link.
+func (d *DB) NoteRescan(id int64) error {
+	_, err := d.sql.Exec(`UPDATE pending_links
+SET rescans = rescans + 1, rescan_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?`, id)
+	return err
 }

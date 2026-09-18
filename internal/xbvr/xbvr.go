@@ -25,8 +25,12 @@ func NewClient(baseURL string) *Client {
 	return &Client{baseURL: baseURL, http: &http.Client{Timeout: 30 * time.Second}}
 }
 
-// File mirrors the XBVR file fields Wankarr needs for quality comparison.
+// File mirrors the XBVR file fields Wankarr needs for quality comparison
+// and post-download linking.
 type File struct {
+	ID             uint    `json:"id"`
+	SceneID        uint    `json:"scene_id"`
+	Filename       string  `json:"filename"`
 	VideoWidth     int     `json:"video_width"`
 	VideoHeight    int     `json:"video_height"`
 	VideoBitRate   int     `json:"video_bitrate"`
@@ -140,6 +144,58 @@ func (c *Client) ListOwned() ([]OwnedScene, error) {
 		}
 	}
 	return out, nil
+}
+
+// Rescan triggers XBVR's library rescan (async server-side): new files
+// appearing in watched volumes are picked up and auto-matched to scenes
+// by filename. It returns once the task is queued, not when it finishes.
+func (c *Client) Rescan() error {
+	return c.get("/api/task/rescan")
+}
+
+// FindFile looks up XBVR files whose filename contains name (usually the
+// Transmission torrent name). It prefers unmatched files and reports
+// whether anything was found at all.
+func (c *Client) FindFile(name string) (File, bool, error) {
+	body, _ := json.Marshal(map[string]any{"filename": name})
+	var files []File
+	if err := c.post("/api/files/list", body, &files); err != nil {
+		return File{}, false, err
+	}
+	if len(files) == 0 {
+		return File{}, false, nil
+	}
+	for _, f := range files {
+		if f.SceneID == 0 {
+			return f, true, nil
+		}
+	}
+	return files[0], true, nil
+}
+
+// MatchFile explicitly links an XBVR file to a scene. Used when the
+// rescan's filename auto-match leaves a wishlist grab unlinked.
+func (c *Client) MatchFile(sceneID string, fileID uint) error {
+	body, _ := json.Marshal(map[string]any{"scene_id": sceneID, "file_id": fileID})
+	var dst any
+	return c.post("/api/files/match", body, &dst)
+}
+
+func (c *Client) get(path string) error {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("xbvr GET %s: %w", path, err)
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("xbvr GET %s: status %d", path, res.StatusCode)
+	}
+	return nil
 }
 
 func (c *Client) post(path string, body []byte, dst any) error {

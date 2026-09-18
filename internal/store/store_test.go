@@ -125,3 +125,59 @@ func TestLegacyDBMigrates(t *testing.T) {
 		t.Fatalf("migrated read = %+v", got)
 	}
 }
+
+func TestPendingLifecycle(t *testing.T) {
+	db := openTemp(t)
+	id, err := db.AddPending(7, "Scene 8K", "1154515", "fuckpassvr-001", "Rainy City Rendezvous")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pend, err := db.ListActivePending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pend) != 1 || pend[0].ID != id || pend[0].Status != "downloading" {
+		t.Fatalf("pending = %+v", pend)
+	}
+	if err := db.NoteRescan(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetPendingStatus(id, "downloaded"); err != nil {
+		t.Fatal(err)
+	}
+	pend, err = db.ListActivePending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pend) != 1 || pend[0].Rescans != 1 {
+		t.Fatalf("after rescan = %+v", pend)
+	}
+	if err := db.SetPendingStatus(id, "linked"); err != nil {
+		t.Fatal(err)
+	}
+	pend, err = db.ListActivePending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pend) != 0 {
+		t.Fatalf("linked rows must drop out, got %+v", pend)
+	}
+}
+
+func TestGetItem(t *testing.T) {
+	db := openTemp(t)
+	it := Item{GroupID: "1154515", Title: "Scene", PubDate: time.Now().UTC(), FetchedAt: time.Now().UTC()}
+	if _, err := db.UpsertItem(it); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetItem("1154515")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Scene" {
+		t.Errorf("title = %q", got.Title)
+	}
+	if _, err := db.GetItem("missing"); err == nil {
+		t.Error("expected error for missing group, got nil")
+	}
+}

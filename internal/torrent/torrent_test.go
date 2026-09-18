@@ -35,12 +35,15 @@ func TestAddURLHandshake(t *testing.T) {
 	var seen []string
 	srv := stub(t, &seen)
 	t.Cleanup(srv.Close)
-	name, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl?id=1")
+	name, id, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl?id=1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if name != "Scene 8K" {
 		t.Errorf("name = %q", name)
+	}
+	if id != 7 {
+		t.Errorf("id = %d, want 7", id)
 	}
 	if len(seen) != 2 || seen[1] != "sess-1:torrent-add" {
 		t.Errorf("session handshake not retried with id: %v", seen)
@@ -52,7 +55,7 @@ func TestAddURLFailure(t *testing.T) {
 		http.Error(w, "denied", http.StatusForbidden)
 	}))
 	t.Cleanup(srv.Close)
-	if _, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl"); err == nil {
+	if _, _, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl"); err == nil {
 		t.Error("expected error on 403, got nil")
 	}
 }
@@ -65,12 +68,15 @@ func TestDuplicateReported(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	name, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl")
+	name, id, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(name, "already queued") {
 		t.Errorf("name = %q, want duplicate note", name)
+	}
+	if id != 3 {
+		t.Errorf("id = %d, want duplicate id 3", id)
 	}
 }
 
@@ -88,7 +94,7 @@ func TestAddURLSendsDownloadDir(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	if _, err := NewTransmissionWithDir(srv.URL, "", "", "/mnt/media/vr").AddURL("https://example.invalid/dl"); err != nil {
+	if _, _, err := NewTransmissionWithDir(srv.URL, "", "", "/mnt/media/vr").AddURL("https://example.invalid/dl"); err != nil {
 		t.Fatal(err)
 	}
 	if gotArgs["download-dir"] != "/mnt/media/vr" {
@@ -110,10 +116,63 @@ func TestAddURLOmitsDownloadDirWhenEmpty(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	if _, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl"); err != nil {
+	if _, _, err := NewTransmission(srv.URL, "", "").AddURL("https://example.invalid/dl"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := gotArgs["download-dir"]; ok {
 		t.Errorf("download-dir = %v, want omitted for empty config", gotArgs["download-dir"])
+	}
+}
+
+func statusStub(t *testing.T, torrents []map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req rpcRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		if req.Method != "torrent-get" {
+			t.Errorf("method = %q, want torrent-get", req.Method)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result":    "success",
+			"arguments": map[string]any{"torrents": torrents},
+		})
+	}))
+}
+
+func TestStatusOfDone(t *testing.T) {
+	srv := statusStub(t, []map[string]any{
+		{"id": 7, "name": "Scene 8K", "percentDone": 1, "status": 6, "isFinished": true},
+	})
+	t.Cleanup(srv.Close)
+	st, err := NewTransmission(srv.URL, "", "").StatusOf(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Done() || st.Name != "Scene 8K" {
+		t.Errorf("status = %+v, want done Scene 8K", st)
+	}
+}
+
+func TestStatusOfDownloading(t *testing.T) {
+	srv := statusStub(t, []map[string]any{
+		{"id": 7, "name": "Scene 8K", "percentDone": 0.4, "status": 4, "isFinished": false},
+	})
+	t.Cleanup(srv.Close)
+	st, err := NewTransmission(srv.URL, "", "").StatusOf(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Done() {
+		t.Errorf("status = %+v, want not done", st)
+	}
+}
+
+func TestStatusOfNotFound(t *testing.T) {
+	srv := statusStub(t, nil)
+	t.Cleanup(srv.Close)
+	if _, err := NewTransmission(srv.URL, "", "").StatusOf(99); err != ErrTorrentNotFound {
+		t.Errorf("err = %v, want ErrTorrentNotFound", err)
 	}
 }
