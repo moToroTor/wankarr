@@ -1,0 +1,194 @@
+'use strict';
+
+const $ = (sel) => document.querySelector(sel);
+
+function humanBytes(n) {
+  if (!n) return '—';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
+}
+
+async function fetchJSON(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  return res.json();
+}
+
+function setStatus(msg) { $('#status').textContent = msg || ''; }
+
+// Titles and tags arrive from third-party feeds: escape everything
+// interpolated into markup.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function variantRow(v) {
+  const badges = [];
+  if (v.resolution) badges.push(`<span class="badge">${esc(v.resolution)}</span>`);
+  if (v.codec) badges.push(`<span class="badge">${esc(v.codec)}</span>`);
+  if (v.hbr) badges.push('<span class="badge hbr">HBR</span>');
+  if (v.freeleech) badges.push('<span class="badge pick">FL</span>');
+  if (v.pick) badges.push('<span class="badge pick">profile pick</span>');
+  const seeds = v.seeders ? ` · ${v.seeders} seed${v.seeders === 1 ? '' : 's'}` : '';
+  return `<tr class="${v.pick ? 'pick' : ''}">
+    <td>${badges.join('')}</td>
+    <td>${humanBytes(v.size_bytes)}${esc(seeds)} <span class="src">${esc(v.source || '')}</span></td>
+    <td>${v.pub_date ? esc(v.pub_date.slice(0, 10)) : '—'}</td>
+    <td>${esc(v.premium_note || '')}</td>
+    <td><button data-send="${esc(v.group_id)}" title="Queue in Transmission">Send</button></td>
+  </tr>`;
+}
+
+async function sendTorrent(groupID, btn) {
+  btn.disabled = true;
+  setStatus(`Queueing ${groupID} in Transmission…`);
+  try {
+    const r = await fetchJSON('/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_id: groupID }),
+    });
+    setStatus(`Queued: ${r.queued}`);
+    btn.textContent = 'Queued';
+  } catch (e) {
+    setStatus(`Send failed: ${e.message}`);
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-send]');
+  if (btn) sendTorrent(btn.dataset.send, btn);
+  const sbtn = e.target.closest('[data-search-query]');
+  if (sbtn) searchTitle(sbtn.dataset.searchQuery, sbtn.dataset.searchTitle, sbtn);
+});
+
+function groupCard(g) {
+  const wanted = g.wanted_scene
+    ? `<div class="wanted">Wanted: ${esc(g.wanted_scene)} (score ${Number(g.wanted_score).toFixed(2)})</div>` : '';
+  const cover = g.cover
+    ? `<img class="cover" src="${esc(g.cover)}" alt="" loading="lazy" onerror="this.remove()">` : '';
+  return `<article class="group">
+    <div class="group-head">${cover}<div><h2>${esc(g.title)}</h2>${wanted}</div></div>
+    <table><thead><tr><th>Variant</th><th>Size</th><th>Published</th><th>Note</th><th></th></tr></thead>
+    <tbody>${g.variants.map(variantRow).join('')}</tbody></table>
+  </article>`;
+}
+
+let activeQuery = '';
+
+async function showGroups() {
+  setStatus('Loading groups…');
+  try {
+    const params = new URLSearchParams();
+    if (!$('#vr-only').checked) params.set('vr', '0');
+    if (activeQuery) params.set('q', activeQuery);
+    const qs = params.toString();
+    const groups = await fetchJSON(`/api/groups${qs ? `?${qs}` : ''}`);
+    const filterNote = activeQuery
+      ? `<p>Filtered to “${esc(activeQuery)}” <button id="clear-q">show all</button></p>` : '';
+    $('#groups-view').innerHTML = filterNote + (groups.length
+      ? groups.map(groupCard).join('')
+      : '<p>No matching groups. Poll an RSS feed or run a search.</p>');
+    const clear = $('#clear-q');
+    if (clear) clear.addEventListener('click', () => {
+      activeQuery = '';
+      $('#search-q').value = '';
+      showGroups();
+    });
+    setStatus(`${groups.length} scene group(s) shown.`);
+  } catch (e) { setStatus(`Error: ${e.message}`); }
+}
+
+async function showMatches() {
+  setStatus('Loading matches…');
+  try {
+    const matches = await fetchJSON('/api/matches');
+    $('#match-count').textContent = matches.length ? `(${matches.length})` : '';
+    $('#matches-view').innerHTML = matches.length
+      ? matches.map((m) => `<div class="match"><strong>${esc(m.GroupKey)}</strong><br>wanted scene ${esc(m.SceneID)} — score ${Number(m.Score).toFixed(2)}</div>`).join('')
+      : '<p>No wishlist matches yet.</p>';
+    setStatus('');
+  } catch (e) { setStatus(`Error: ${e.message}`); }
+}
+
+function switchView(name) {
+  document.querySelectorAll('nav button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.view === name));
+  $('#groups-view').hidden = name !== 'groups';
+  $('#wishlist-view').hidden = name !== 'wishlist';
+  $('#matches-view').hidden = name !== 'matches';
+  if (name === 'groups') showGroups();
+  else if (name === 'wishlist') showWishlist();
+  else showMatches();
+}
+
+async function showWishlist() {
+  setStatus('Loading wishlist from XBVR…');
+  try {
+    const items = await fetchJSON('/api/wishlist');
+    $('#wishlist-view').innerHTML = items.length
+      ? items.map(wishlistCard).join('')
+      : '<p>Wishlist is empty.</p>';
+    setStatus(`${items.length} wishlisted scene(s).`);
+  } catch (e) { setStatus(`Error: ${e.message}`); }
+}
+
+function wishlistCard(it) {
+  const who = (it.performers || []).join(', ');
+  // Narrow the Emp search with the first known performer: cuts the
+  // clown-fetish noise without losing the scene when the title matches.
+  const query = it.performers && it.performers.length
+    ? `${it.title} ${it.performers[0]}` : it.title;
+  const known = it.groups && it.groups.length
+    ? `<p>${it.groups.length} known Emp group(s):</p>${it.groups.map(groupCard).join('')}`
+    : '<p>No Emp results known yet — search to check.</p>';
+  return `<article class="group"><div class="group-head">
+    ${it.cover ? `<img class="cover" src="${esc(it.cover)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
+    <div><h2>${esc(it.title)}</h2>
+    <div class="wanted">${esc(it.site || '')}${who ? ` · ${esc(who)}` : ''}</div>
+    <button data-search-query="${esc(query)}" data-search-title="${esc(it.title)}">Search Emp</button>
+    </div></div>${known}</article>`;
+}
+
+async function searchTitle(query, title, btn) {
+  if (btn) btn.disabled = true;
+  setStatus(`Searching Emp for “${title}”… (one Jackett query, results cached)`);
+  try {
+    const r = await fetchJSON(`/api/search?q=${encodeURIComponent(query)}`);
+    setStatus(`Search complete: ${r.results} result(s), ${r.new} new.`);
+    activeQuery = query;
+    $('#search-q').value = query;
+    switchView('groups');
+  } catch (e) {
+    setStatus(`Search error: ${e.message}`);
+    if (btn) btn.disabled = false;
+  }
+}
+
+document.querySelectorAll('nav button').forEach((b) =>
+  b.addEventListener('click', () => switchView(b.dataset.view)));
+
+$('#vr-only').addEventListener('change', () => switchView('groups'));
+
+$('#rematch').addEventListener('click', async () => {
+  setStatus('Re-matching index against wishlist…');
+  try {
+    await fetchJSON('/api/rematch', { method: 'POST' });
+    setStatus('Rematch running — check New matches in a few seconds.');
+  } catch (e) { setStatus(`Rematch error: ${e.message}`); }
+});
+
+$('#search-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('#search-q').value.trim();
+  if (!q) return;
+  searchTitle(q, q, null);
+});
+
+switchView('groups');
+showMatches();

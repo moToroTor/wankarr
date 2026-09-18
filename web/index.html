@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wankarr</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Wankarr</h1>
+  <nav>
+    <button data-view="groups" class="active">Groups</button>
+    <button data-view="wishlist">Wishlist</button>
+    <button data-view="matches">New matches <span id="match-count"></span></button>
+  </nav>
+  <form id="search-form">
+    <input id="search-q" type="search" placeholder="Search Emp via Jackett…" aria-label="Search Emp">
+    <button type="submit">Search</button>
+  </form>
+  <button id="rematch" title="Re-check the whole index against the XBVR wishlist">Rematch wishlist</button>
+  <label><input id="vr-only" type="checkbox" checked> VR only</label>
+</header>
+<main>
+  <p id="status" role="status"></p>
+  <section id="groups-view"></section>
+  <section id="wishlist-view" hidden></section>
+  <section id="matches-view" hidden></section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

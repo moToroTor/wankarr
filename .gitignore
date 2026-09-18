@@ -1,0 +1,6 @@
+# Wankarr local ignores — secrets and runtime data stay out of version control.
+.env
+/wankarr
+*.db
+*.db-journal
+*.db-wal

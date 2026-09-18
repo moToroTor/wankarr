@@ -1,0 +1,38 @@
+package match
+
+import (
+	"testing"
+
+	"wankarr/internal/emp"
+	"wankarr/internal/xbvr"
+)
+
+func TestScoreMatchesVariantGroup(t *testing.T) {
+	key := emp.GroupKey("FuckPassVR - Rainy City Rendezvous - Mia James (2026.08.28) (Oculus 8K, UHD)")
+	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"}
+	if s := Score(key, w); s < 1 {
+		t.Errorf("score = %v, want 1 (full title + studio)", s)
+	}
+}
+
+func TestScoreRejectsUnrelated(t *testing.T) {
+	key := emp.GroupKey("VRCosplayX - The Legend of Vox Machina: Keyleth A XXX Parody - Gracey Snow (2026.09.17) (Oculus 8K)")
+	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"}
+	if s := Score(key, w); s != 0 {
+		t.Errorf("score = %v, want 0", s)
+	}
+}
+
+func TestAgainstWishlistThreshold(t *testing.T) {
+	groups := map[string][]emp.Variant{
+		emp.GroupKey("FuckPassVR - Rainy City Rendezvous - Mia James (2026.08.28) (Oculus 8K)"): {{Height: 1920}},
+		emp.GroupKey("Some Other Scene (2026.01.01) (4K)"):                                      {{Height: 1024}},
+	}
+	wishlist := []xbvr.WantedScene{
+		{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"},
+	}
+	got := AgainstWishlist(groups, wishlist, 0.6)
+	if len(got) != 1 || got[0].Scene.SceneID != "fp-1" {
+		t.Fatalf("matches = %+v, want exactly the FuckPassVR pairing", got)
+	}
+}
