@@ -205,3 +205,29 @@ func TestGroupKeyStripsVariantParenthetical(t *testing.T) {
 		t.Errorf("keys differ:\n%q\n%q", a, b)
 	}
 }
+
+// Reported bug: a Jackett-sourced "(Oculus 8K, HQ)" upload arrived with
+// no usable tags (only the Torznab category) and was shown without the
+// HBR badge. Title tokens must backstop the tag check.
+func TestDeriveHBRFromTitle(t *testing.T) {
+	cases := []struct {
+		title string
+		tags  []string
+		want  bool
+	}{
+		{"PornCornVR - Anal Enjoyment with Lauren Phillips (2026.01.17) (Oculus 8K, HQ)", []string{"cat:100002"}, true},
+		{"Studio - Scene (2026.01.01) (Oculus 8K, HBR)", nil, true},
+		{"Studio - Scene (2026.01.01) (Oculus 8K, High Bitrate)", nil, true},
+		{"Studio - Scene (2026.01.01) (Oculus 8K)", nil, false},
+		{"Studio - Scene (2026.01.01) (Oculus 8K, UHD)", nil, false},
+	}
+	for _, tc := range cases {
+		if got := DeriveVariant(store.Item{Title: tc.title, Tags: tc.tags}).HBR; got != tc.want {
+			t.Errorf("%q: HBR = %v, want %v", tc.title, got, tc.want)
+		}
+	}
+	// Tag-only signals still work with a bare title.
+	if got := DeriveVariant(store.Item{Title: "Studio - Scene", Tags: []string{"high.bitrate"}}).HBR; !got {
+		t.Error("high.bitrate tag: HBR = false, want true")
+	}
+}

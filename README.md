@@ -43,7 +43,9 @@ designed accordingly:
   by Emp torrent-group ID (dedupe is automatic).
 - **Grouping**: titles minus the trailing variant parenthetical form a
   scene group; resolution comes from tags (`4096p`, `3840p`, …) with title
-  fallback (`Oculus 8K`); `high.bitrate` marks HBR variants. Funscripts,
+  fallback (`Oculus 8K`); `high.bitrate` marks HBR variants, with title
+  tokens (`HBR`, `HQ`, `high bitrate`) as fallback for tag-less Jackett
+  records. Funscripts,
   packs, and other accessories are excluded from scene rows.
 - **Jackett records** also carry seeders and freeleech status, and the
   Emp tag list (parsed from the result description, which is how

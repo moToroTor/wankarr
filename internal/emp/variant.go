@@ -23,11 +23,17 @@ var resTags = []struct {
 
 var trailingVariantRe = regexp.MustCompile(`\s*\([^()]*\)\s*$`)
 
+// hbrTitleRe spots high-bitrate signals in the title itself: uploaders
+// mark HBR variants "(Oculus 8K, HBR)", "(Oculus 8K, HQ)", or with
+// "high bitrate" in various spellings. This is a fallback for records
+// (notably Jackett/Torznab ones) whose tag list carries no signal.
+var hbrTitleRe = regexp.MustCompile(`\b(hbr|hq)\b|high[ ._\-]*bitrate`)
+
 // Variant is one upload of a scene with derived quality signals.
 type Variant struct {
 	Item       store.Item
 	Height     int  // derived frame height, 0 when unknown
-	HBR        bool // high.bitrate tag present
+	HBR        bool // high-bitrate signal in tags or title tokens
 	Resolution string
 	Codec      string // "h265", "h264", or "av1" when tagged, else ""
 }
@@ -53,7 +59,7 @@ func DeriveVariant(it store.Item) Variant {
 	for _, t := range it.Tags {
 		lowerTags[strings.ToLower(t)] = true
 	}
-	v.HBR = lowerTags["high.bitrate"] || lowerTags["highbitrate"]
+	v.HBR = lowerTags["high.bitrate"] || lowerTags["highbitrate"] || lowerTags["hbr"] || lowerTags["hq"]
 	for _, t := range []string{"h.265", "h265", "hevc", "x265"} {
 		if lowerTags[t] {
 			v.Codec = "h265"
@@ -77,6 +83,9 @@ func DeriveVariant(it store.Item) Variant {
 		}
 	}
 	title := strings.ToLower(it.Title)
+	if !v.HBR && hbrTitleRe.MatchString(title) {
+		v.HBR = true
+	}
 	for _, r := range resTags {
 		if lowerTags[r.tag] {
 			v.Height = r.height
