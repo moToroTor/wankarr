@@ -1,58 +1,60 @@
 {
   "packages": [
     {
+      "arch": "aarch64",
       "changelog": "See https://github.com/moToroTor/wankarr/releases",
       "desc": "XBVR wishlist companion: track, compare and queue VR tracker releases.",
       "distributor": "moToroTor",
       "distributor_url": "https://github.com/moToroTor/wankarr",
       "dname": "Wankarr",
-      "link": "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_aarch64-7.1_0.1.0-1.spk",
+      "link": "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.1-1.spk",
       "maintainer": "moToroTor",
       "maintainer_url": "https://github.com/moToroTor/wankarr",
-      "md5": "31e428e994813f927840ad4d55431763",
+      "md5": "08665973c1d7646e4e70b84f7e73a1e5",
       "package": "wankarr",
       "qinst": true,
       "qstart": true,
       "qupgrade": true,
-      "size": 8772537,
+      "size": 8772538,
       "snapshot": [],
       "startable": "yes",
       "thumbnail": [
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_aarch64-7.1_0.1.0-1.icon_72.png",
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_aarch64-7.1_0.1.0-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.1-1.icon_72.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.1-1.icon_256.png"
       ],
       "thumbnail_retina": [
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_aarch64-7.1_0.1.0-1.icon_256.png",
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_aarch64-7.1_0.1.0-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.1-1.icon_256.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.1-1.icon_256.png"
       ],
-      "version": "0.1.0-1"
+      "version": "0.1.1-1"
     },
     {
+      "arch": "avoton",
       "changelog": "See https://github.com/moToroTor/wankarr/releases",
       "desc": "XBVR wishlist companion: track, compare and queue VR tracker releases.",
       "distributor": "moToroTor",
       "distributor_url": "https://github.com/moToroTor/wankarr",
       "dname": "Wankarr",
-      "link": "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_avoton-7.1_0.1.0-1.spk",
+      "link": "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.1-1.spk",
       "maintainer": "moToroTor",
       "maintainer_url": "https://github.com/moToroTor/wankarr",
-      "md5": "4558122d24597dbce39b28f557c29a80",
+      "md5": "8555f8c50d946cacd32cab36bb0edaff",
       "package": "wankarr",
       "qinst": true,
       "qstart": true,
       "qupgrade": true,
-      "size": 9331997,
+      "size": 9331776,
       "snapshot": [],
       "startable": "yes",
       "thumbnail": [
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_avoton-7.1_0.1.0-1.icon_72.png",
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_avoton-7.1_0.1.0-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.1-1.icon_72.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.1-1.icon_256.png"
       ],
       "thumbnail_retina": [
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_avoton-7.1_0.1.0-1.icon_256.png",
-        "https://github.com/moToroTor/wankarr/releases/download/v0.1.0/wankarr_avoton-7.1_0.1.0-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.1-1.icon_256.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.1-1.icon_256.png"
       ],
-      "version": "0.1.0-1"
+      "version": "0.1.1-1"
     }
   ]
 }
