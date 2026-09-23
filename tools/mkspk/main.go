@@ -100,6 +100,8 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 	spkPath := filepath.Join(out, spkName)
 	files := []tarFile{
 		{Name: "INFO", Mode: 0o644, Data: []byte(info)},
+		{Name: "scripts", Mode: 0o755, Dir: true},
+		{Name: "conf", Mode: 0o755, Dir: true},
 		{Name: "PACKAGE_ICON.PNG", Mode: 0o644, Data: mustRead(filepath.Join(iconDir, "PACKAGE_ICON.PNG"))},
 		{Name: "PACKAGE_ICON_256.PNG", Mode: 0o644, Data: mustRead(filepath.Join(iconDir, "PACKAGE_ICON_256.PNG"))},
 		{Name: "package.tgz", Mode: 0o644, Data: mustRead(pkgTgz)},
@@ -108,8 +110,10 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 		{Name: "scripts/service-setup", Mode: 0o644, Data: read("scripts/service-setup")},
 		{Name: "conf/privilege", Mode: 0o644, Data: read("conf/privilege")},
 	}
-	// DSM expects the outer .spk to be a gzipped tar (like SynoCommunity builds).
-	if err := writeTar(spkPath, files, true); err != nil {
+	// The outer .spk is a plain (uncompressed) tar like SynoCommunity
+	// builds; only the inner package.tgz is gzipped. DSM rejects a
+	// gzipped outer package as "Invalid file format".
+	if err := writeTar(spkPath, files, false); err != nil {
 		return err
 	}
 
@@ -133,6 +137,7 @@ type tarFile struct {
 	Name string
 	Mode int64
 	Data []byte
+	Dir  bool
 }
 
 // genIcons runs the icon generator into dir, locating the module root by
@@ -187,12 +192,20 @@ func writeTar(path string, files []tarFile, gz bool) error {
 		hdr := &tar.Header{
 			Name: tf.Name, Mode: tf.Mode, Size: int64(len(tf.Data)),
 			ModTime: fixedTime, Format: tar.FormatUSTAR,
+			Uid: 0, Gid: 0, Uname: "root", Gname: "root",
+		}
+		if tf.Dir {
+			hdr.Typeflag = tar.TypeDir
+			hdr.Name += "/"
+			hdr.Size = 0
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		if _, err := tw.Write(tf.Data); err != nil {
-			return err
+		if !tf.Dir {
+			if _, err := tw.Write(tf.Data); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
