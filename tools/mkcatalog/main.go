@@ -4,7 +4,7 @@
 // Usage:
 //
 //	go run ./tools/mkcatalog --manifests 'dist/*.manifest.json' \
-//	    --assets https://github.com/moToroTor/wankarr/releases/download/v1.0.0 \
+//	    --assets https://motorotor.github.io/wankarr/dl \
 //	    --out catalog.json
 //
 // The output matches spkrepo's catalog entry shape (package, version,
@@ -58,6 +58,7 @@ func run(pattern, assets, out string) error {
 		icon256 := strings.TrimSuffix(filename, ".spk") + ".icon_256.png"
 		pkgs = append(pkgs, map[string]any{
 			"package":          "wankarr",
+			"arch":             m["arch"],
 			"version":          m["version"],
 			"dname":            "Wankarr",
 			"desc":             "XBVR wishlist companion: track, compare and queue VR tracker releases.",

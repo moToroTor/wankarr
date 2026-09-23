@@ -68,11 +68,13 @@ jobs:
             dist/*.spk dist/*.icon_72.png dist/*.icon_256.png
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Generate catalog.json
+      - name: Stage Pages download dir and generate catalog.json
         run: |
+          mkdir -p pages/dl
+          cp dist/*.spk dist/*.icon_72.png dist/*.icon_256.png pages/dl/
           go run ./tools/mkcatalog \
             --manifests 'dist/*.manifest.json' \
-            --assets "https://github.com/moToroTor/wankarr/releases/download/${GITHUB_REF_NAME}" \
+            --assets "https://motorotor.github.io/wankarr/dl" \
             --out catalog.json
           mkdir -p pages/api
           cp catalog.json pages/catalog.json

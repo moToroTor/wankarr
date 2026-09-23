@@ -105,7 +105,7 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 		{Name: "package.tgz", Mode: 0o644, Data: mustRead(pkgTgz)},
 		{Name: "scripts/installer", Mode: 0o755, Data: read("scripts/installer")},
 		{Name: "scripts/start-stop-status", Mode: 0o755, Data: read("scripts/start-stop-status")},
-		{Name: "scripts/service-setup.sh", Mode: 0o644, Data: read("scripts/service-setup.sh")},
+		{Name: "scripts/service-setup", Mode: 0o644, Data: read("scripts/service-setup")},
 		{Name: "conf/privilege", Mode: 0o644, Data: read("conf/privilege")},
 	}
 	// DSM expects the outer .spk to be a gzipped tar (like SynoCommunity builds).
