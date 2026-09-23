@@ -75,6 +75,7 @@ jobs:
             --assets "https://github.com/moToroTor/wankarr/releases/download/${GITHUB_REF_NAME}" \
             --out catalog.json
           mkdir -p pages/api
+          cp catalog.json pages/catalog.json
           cp catalog.json pages/api/package
           cp catalog.json pages/api/package.json
       - name: Deploy catalog to GitHub Pages
