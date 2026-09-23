@@ -108,7 +108,8 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 		{Name: "scripts/service-setup.sh", Mode: 0o644, Data: read("scripts/service-setup.sh")},
 		{Name: "conf/privilege", Mode: 0o644, Data: read("conf/privilege")},
 	}
-	if err := writeTar(spkPath, files, false); err != nil {
+	// DSM expects the outer .spk to be a gzipped tar (like SynoCommunity builds).
+	if err := writeTar(spkPath, files, true); err != nil {
 		return err
 	}
 
