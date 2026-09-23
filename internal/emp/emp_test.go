@@ -198,6 +198,52 @@ func TestProfilePick(t *testing.T) {
 	}
 }
 
+func TestGroupMergesReorderedPerformerTitles(t *testing.T) {
+	items := []store.Item{
+		{
+			GroupID: "a", Title: "CzechVR 899 - Nerdy Girl Next-Door - Emejota (2026.09.07) (GearVR)",
+			Tags: []string{"1440p", "virtual.reality"}, SizeBytes: 4 << 30,
+			PubDate: time.Now().UTC(), FetchedAt: time.Now().UTC(),
+		},
+		{
+			GroupID: "b", Title: "CzechVR 899 - Emejota - Nerdy Girl Next-Door (8K)",
+			Tags: []string{"4096p", "virtual.reality"}, SizeBytes: 18 << 30,
+			PubDate: time.Now().UTC(), FetchedAt: time.Now().UTC(),
+		},
+	}
+	groups := Group(items)
+	if len(groups) != 1 {
+		keys := []string{}
+		for k := range groups {
+			keys = append(keys, k)
+		}
+		t.Fatalf("groups = %d %v, want 1 merged group", len(groups), keys)
+	}
+	for _, vs := range groups {
+		if len(vs) != 2 {
+			t.Fatalf("variants = %d, want 2", len(vs))
+		}
+		if vs[0].Height != 2048 {
+			t.Errorf("first variant height = %d, want 8K first", vs[0].Height)
+		}
+	}
+}
+
+func TestGroupKeepsDifferentScenesApart(t *testing.T) {
+	mk := func(id, title string) store.Item {
+		return store.Item{GroupID: id, Title: title,
+			Tags: []string{"4096p", "virtual.reality"}, SizeBytes: 18 << 30,
+			PubDate: time.Now().UTC(), FetchedAt: time.Now().UTC()}
+	}
+	groups := Group([]store.Item{
+		mk("a", "CzechVR 899 - Nerdy Girl Next-Door - Emejota (8K)"),
+		mk("b", "CzechVR 900 - Different Scene Entirely - Other Girl (8K)"),
+	})
+	if len(groups) != 2 {
+		t.Fatalf("groups = %d, want 2 (899 vs 900 stay apart)", len(groups))
+	}
+}
+
 func TestGroupKeyStripsVariantParenthetical(t *testing.T) {
 	a := GroupKey("FuckPassVR - Rainy City Rendezvous - Mia James (2026.08.28) (Oculus 8K, UHD)")
 	b := GroupKey("FuckPassVR - Rainy City Rendezvous - Mia James (2026.08.28) (Oculus, Go 4K)")

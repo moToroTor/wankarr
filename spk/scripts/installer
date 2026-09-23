@@ -1,0 +1,47 @@
+#!/bin/sh
+# Wankarr package installer (DSM 7 conventions, cf. spksrc installer.dsm7).
+# Dispatches preinst/postinst/preuninst/postuninst/preupgrade/postupgrade,
+# invoking service_* hooks from service-setup when present.
+
+SVC_SETUP=$(dirname "$0")"/service-setup"
+if [ -r "${SVC_SETUP}" ]; then
+    . "${SVC_SETUP}"
+fi
+
+call_func()
+{
+    FUNC="$1"
+    if type "${FUNC}" 2>/dev/null | grep -q 'function' 2>/dev/null; then
+        eval "${FUNC}"
+    fi
+}
+
+case $1 in
+    preinst)
+        call_func "service_preinst"
+        exit 0
+        ;;
+    postinst)
+        call_func "service_postinst"
+        exit 0
+        ;;
+    preuninst)
+        call_func "service_preuninst"
+        exit 0
+        ;;
+    postuninst)
+        # Keep var/ (.env, wankarr.db) on uninstall; DSM removes it only
+        # when the user ticks "remove data". Nothing to do here.
+        call_func "service_postuninst"
+        exit 0
+        ;;
+    preupgrade)
+        call_func "service_preupgrade"
+        exit 0
+        ;;
+    postupgrade)
+        call_func "service_postupgrade"
+        exit 0
+        ;;
+esac
+exit 1

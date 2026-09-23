@@ -73,6 +73,45 @@ queries exclude the column, the UI only ever sends group IDs, and logs
 redact feed URLs. Test fixtures must use scrubbed samples (fake host, no
 credentials) — see `internal/emp` and `internal/jackett` tests.
 
+## Running on a Synology NAS (DSM 7)
+
+Wankarr ships as a proper DSM 7 package: install it from Package Center
+and it runs as its own service user, survives reboots, and notifies you
+of updates.
+
+**First install:** download the `.spk` for your arch from the
+[releases page](https://github.com/moToroTor/wankarr/releases), then
+Package Center → Manual Install. DSM warns about the third-party
+publisher (normal — signing has no effect on DSM 7). After install,
+create `/var/packages/wankarr/var/.env` (File Station text editor works)
+with your values — see `.env.example` — then start the package. The
+service runs the binary with that directory as its working directory, so
+`wankarr.db` lives next to `.env`.
+
+**Auto-updates:** add the catalog URL as a Package Source (Package
+Center → Settings → Package Sources). Each tagged release rebuilds the
+`.spk` files and the catalog, so new versions appear as Update badges:
+
+`https://moToroTor.github.io/wankarr/api/package`
+
+**NAS `.env` notes:** Transmission and Jackett are local, so
+`TRANSMISSION_URL=http://127.0.0.1:9091/transmission/rpc` and
+`JACKETT_URL=http://127.0.0.1:9117`; `XBVR_URL` stays whatever it is on
+the LAN.
+
+**Manual alternative (no package):** `make nas`, copy
+`dist/wankarr-linux-amd64` plus a NAS `.env` anywhere sensible (not the
+docker folder), and autostart via DSM Task Scheduler (Triggered Task →
+Boot-up): `cd /path/to/wankarr && ./wankarr-linux-amd64 >> wankarr.log 2>&1`.
+
+## Cutting a release (maintainer)
+
+1. `git tag vX.Y.Z && git push origin vX.Y.Z`
+2. The `release` workflow cross-compiles (x86-64/avoton, ARM64),
+   assembles per-arch `.spk` files, publishes the GitHub Release with
+   assets, and redeploys the Package Center catalog to GitHub Pages.
+3. Test the update path on the NAS before announcing anything.
+
 ## Development
 
 - `go test ./...`, `go vet ./...`, `gofmt -l .` (must be clean).

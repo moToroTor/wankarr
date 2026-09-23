@@ -106,6 +106,83 @@ func DeriveVariant(it store.Item) Variant {
 	return v
 }
 
+// dateRe removes release-date parentheticals, which vary between uploads
+// of the same scene ("(2026.09.07)") and would otherwise split groups.
+var dateRe = regexp.MustCompile(`\(\d{4}[.-]\d{2}[.-]\d{2}\)`)
+
+// mergeThreshold is the minimum token-set Jaccard similarity for fusing
+// two title buckets. Uploaders reorder performer/scene tokens
+// ("Site 899 - Scene - Performer" vs "Site 899 - Performer - Scene"),
+// so exact keys split real scenes; 0.8 keeps "899" vs "900" apart.
+const mergeThreshold = 0.8
+
+// keyTokens returns the significant token set of a group key.
+func keyTokens(key string) map[string]bool {
+	toks := map[string]bool{}
+	for _, t := range strings.Fields(dateRe.ReplaceAllString(key, " ")) {
+		t = strings.Trim(t, "-_.,;:!?()[]")
+		if t != "" {
+			toks[t] = true
+		}
+	}
+	return toks
+}
+
+// mergeSimilar fuses buckets whose token sets overlap at (or above)
+// mergeThreshold, keeping the lexicographically smallest key for
+// determinism. Requires ≥4 shared tokens so tiny titles can't merge on
+// one shared word.
+func mergeSimilar(groups map[string][]Variant) map[string][]Variant {
+	keys := make([]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	tokSets := map[string]map[string]bool{}
+	for _, k := range keys {
+		tokSets[k] = keyTokens(k)
+	}
+	parent := map[string]string{}
+	for _, k := range keys {
+		parent[k] = k
+	}
+	var find func(string) string
+	find = func(x string) string {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			a, b := tokSets[keys[i]], tokSets[keys[j]]
+			inter := 0
+			for t := range a {
+				if b[t] {
+					inter++
+				}
+			}
+			union := len(a) + len(b) - inter
+			if inter >= 4 && union > 0 && float64(inter)/float64(union) >= mergeThreshold {
+				ra, rb := find(keys[i]), find(keys[j])
+				if ra != rb {
+					if rb < ra {
+						ra, rb = rb, ra
+					}
+					parent[rb] = ra
+				}
+			}
+		}
+	}
+	out := map[string][]Variant{}
+	for _, k := range keys {
+		r := find(k)
+		out[r] = append(out[r], groups[k]...)
+	}
+	return out
+}
+
 // Group clusters items into scenes; variants sort best-first by height,
 // non-HBR before HBR at equal height (same pixels, smaller file wins
 // unless the profile says otherwise).
@@ -118,6 +195,7 @@ func Group(items []store.Item) map[string][]Variant {
 		key := GroupKey(it.Title)
 		groups[key] = append(groups[key], DeriveVariant(it))
 	}
+	groups = mergeSimilar(groups)
 	for key := range groups {
 		vs := groups[key]
 		sort.SliceStable(vs, func(i, j int) bool {

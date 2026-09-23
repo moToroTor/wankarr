@@ -1,0 +1,85 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  spk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - dsm_arch: avoton
+            goarch: amd64
+          - dsm_arch: aarch64
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet and test
+        run: go vet ./... && go test ./...
+      - name: Cross-compile binary
+        run: GOOS=linux GOARCH=${{ matrix.goarch }} go build -o dist/wankarr-linux-${{ matrix.goarch }} .
+      - name: Assemble .spk
+        run: |
+          go run ./tools/mkspk \
+            --binary dist/wankarr-linux-${{ matrix.goarch }} \
+            --arch ${{ matrix.dsm_arch }} \
+            --version ${GITHUB_REF_NAME#v} \
+            --rev 1 --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spk-${{ matrix.dsm_arch }}
+          path: dist/
+
+  publish:
+    needs: spk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Extract per-arch icons for catalog links
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq tar > /dev/null
+          for spk in dist/*.spk; do
+            base="${spk%.spk}"
+            tar -xzf "$spk" -C dist PACKAGE_ICON.PNG PACKAGE_ICON_256.PNG
+            mv dist/PACKAGE_ICON.PNG "$base.icon_72.png"
+            mv dist/PACKAGE_ICON_256.PNG "$base.icon_256.png"
+          done
+          ls dist/
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Create GitHub Release with .spk assets
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "Wankarr ${GITHUB_REF_NAME}" \
+            dist/*.spk dist/*.icon_72.png dist/*.icon_256.png
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate catalog.json
+        run: |
+          go run ./tools/mkcatalog \
+            --manifests 'dist/*.manifest.json' \
+            --assets "https://github.com/moToroTor/wankarr/releases/download/${GITHUB_REF_NAME}" \
+            --out catalog.json
+          mkdir -p pages/api
+          cp catalog.json pages/api/package
+          cp catalog.json pages/api/package.json
+      - name: Deploy catalog to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pages
+          publish_branch: gh-pages
