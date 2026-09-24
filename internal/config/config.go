@@ -38,6 +38,9 @@ type Config struct {
 
 	DBPath   string
 	HTTPPort int
+	// HTTPHost is the listen address; empty means all interfaces (needed
+	// on a NAS, where localhost-only would hide the UI from the LAN).
+	HTTPHost string
 
 	PollInterval time.Duration
 }
@@ -89,6 +92,7 @@ func Load(dotenvPath string) (*Config, error) {
 		TransmissionDownloadDir: strings.TrimSpace(get("TRANSMISSION_DOWNLOAD_DIR")),
 		DBPath:                  firstNonEmpty(get("DB_PATH"), DefaultDBPath),
 		HTTPPort:                parsePort(get("HTTP_PORT"), DefaultHTTPPort),
+		HTTPHost:                strings.TrimSpace(get("HTTP_HOST")),
 		PollInterval:            parseDuration(get("POLL_INTERVAL"), 4*time.Hour),
 	}
 	return cfg, nil

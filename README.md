@@ -82,15 +82,14 @@ of updates.
 **First install:** download the `.spk` for your arch from the
 [releases page](https://github.com/moToroTor/wankarr/releases), then
 Package Center → Manual Install. DSM warns about the third-party
-publisher (normal — signing has no effect on DSM 7). After install,
-create `/var/packages/wankarr/var/.env` (File Station text editor works)
-with your values — see `.env.example` — then start the package. An
-upgrade seeds that file with defaults if it is missing, but never
-overwrites it. The service runs the binary with that directory as its
-working directory, so `wankarr.db` lives next to `.env`. (A DSM install
-wizard was tried and parked: DSM 7.1 rejects the package as soon as any
-`WIZARD_UIFILES` entry is present. The generator scripts stay in
-`spk/WIZARD_UIFILES/` with tests for a future retry.)
+publisher (normal — signing has no effect on DSM 7). The install wizard
+asks for your XBVR/Transmission/tracker settings (passwords included) and
+writes `/var/packages/wankarr/var/.env` for you — upgrades show the same
+pages pre-filled from that file, and never overwrite it behind your back.
+The service runs the binary with that directory as its working directory,
+so `wankarr.db` lives next to `.env`. The UI listens on all interfaces
+(`HTTP_HOST` to pin it down, `HTTP_PORT` to move it), so DSM's app icon
+and any LAN browser reach it.
 
 **Auto-updates:** add the catalog URL as a Package Source (Package
 Center → Settings → Package Sources). Each tagged release rebuilds the

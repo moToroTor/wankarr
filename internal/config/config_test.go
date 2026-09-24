@@ -123,6 +123,25 @@ func TestPortOverride(t *testing.T) {
 	}
 }
 
+func TestHostOverride(t *testing.T) {
+	path := writeTempDotenv(t, "HTTP_HOST=127.0.0.1\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HTTPHost != "127.0.0.1" {
+		t.Errorf("HTTPHost = %q, want 127.0.0.1", cfg.HTTPHost)
+	}
+	path2 := writeTempDotenv(t, "# no host key\n")
+	cfg, err = Load(path2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HTTPHost != "" {
+		t.Errorf("HTTPHost = %q, want empty (all interfaces) by default", cfg.HTTPHost)
+	}
+}
+
 func TestMissingFileIsNotError(t *testing.T) {
 	if _, err := Load(filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
 		t.Fatal(err)

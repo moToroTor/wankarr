@@ -103,8 +103,12 @@ func main() {
 		writeJSON(w, map[string]any{"started": true})
 	})
 
-	addr := fmt.Sprintf("127.0.0.1:%d", cfg.HTTPPort)
-	fmt.Printf("wankarr: serving on http://%s\n", addr)
+	addr := fmt.Sprintf("%s:%d", cfg.HTTPHost, cfg.HTTPPort)
+	show := addr
+	if cfg.HTTPHost == "" {
+		show = fmt.Sprintf("0.0.0.0:%d (all interfaces)", cfg.HTTPPort)
+	}
+	fmt.Printf("wankarr: serving on http://%s\n", show)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
