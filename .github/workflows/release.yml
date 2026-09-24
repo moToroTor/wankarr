@@ -27,7 +27,8 @@ jobs:
       - name: Vet and test
         run: go vet ./... && go test ./...
       - name: Cross-compile binary
-        run: GOOS=linux GOARCH=${{ matrix.goarch }} go build -o dist/wankarr-linux-${{ matrix.goarch }} .
+        # Static binary: DSM 7's glibc predates the builders' (see Makefile).
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} go build -o dist/wankarr-linux-${{ matrix.goarch }} .
       - name: Assemble .spk
         run: |
           go run ./tools/mkspk \
