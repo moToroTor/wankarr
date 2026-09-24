@@ -7,10 +7,10 @@
       "distributor": "moToroTor",
       "distributor_url": "https://github.com/moToroTor/wankarr",
       "dname": "Wankarr",
-      "link": "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.11-1.spk",
+      "link": "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.12-1.spk",
       "maintainer": "moToroTor",
       "maintainer_url": "https://github.com/moToroTor/wankarr",
-      "md5": "fc92e4fcc2dc32187460ea4e4a0c11ca",
+      "md5": "a5c9b9929b9b4c0caf6e9ffa025e956b",
       "package": "wankarr",
       "qinst": true,
       "qstart": true,
@@ -19,14 +19,14 @@
       "snapshot": [],
       "startable": "yes",
       "thumbnail": [
-        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.11-1.icon_72.png",
-        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.11-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.12-1.icon_72.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.12-1.icon_256.png"
       ],
       "thumbnail_retina": [
-        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.11-1.icon_256.png",
-        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.11-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.12-1.icon_256.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_aarch64-7.1_0.1.12-1.icon_256.png"
       ],
-      "version": "0.1.11-1"
+      "version": "0.1.12-1"
     },
     {
       "arch": "avoton",
@@ -35,10 +35,10 @@
       "distributor": "moToroTor",
       "distributor_url": "https://github.com/moToroTor/wankarr",
       "dname": "Wankarr",
-      "link": "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.11-1.spk",
+      "link": "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.12-1.spk",
       "maintainer": "moToroTor",
       "maintainer_url": "https://github.com/moToroTor/wankarr",
-      "md5": "baf46eebe711abc9dfa80e0a98704a26",
+      "md5": "62e09072db22a35191e67cdbfcb921c2",
       "package": "wankarr",
       "qinst": true,
       "qstart": true,
@@ -47,14 +47,14 @@
       "snapshot": [],
       "startable": "yes",
       "thumbnail": [
-        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.11-1.icon_72.png",
-        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.11-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.12-1.icon_72.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.12-1.icon_256.png"
       ],
       "thumbnail_retina": [
-        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.11-1.icon_256.png",
-        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.11-1.icon_256.png"
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.12-1.icon_256.png",
+        "https://motorotor.github.io/wankarr/dl/wankarr_avoton-7.1_0.1.12-1.icon_256.png"
       ],
-      "version": "0.1.11-1"
+      "version": "0.1.12-1"
     }
   ]
 }
