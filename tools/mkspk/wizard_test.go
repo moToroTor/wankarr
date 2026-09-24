@@ -197,7 +197,7 @@ func TestServicePostinstWritesEnv(t *testing.T) {
 		"wizard_transmission_url": "http://nas:9091/transmission/rpc",
 		"wizard_transmission_user": "tom",
 		"wizard_transmission_pass": tricky,
-		"wizard_transmission_dir": "/mnt/media/vr",
+		"wizard_transmission_dir": "",
 	}
 	if err := runPostinst(wizard); err != nil {
 		t.Fatalf("postinst failed: %v", err)
@@ -227,8 +227,21 @@ func TestServicePostinstWritesEnv(t *testing.T) {
 	if cfg.TransmissionPass != tricky {
 		t.Errorf("TransmissionPass = %q, want tricky value intact", cfg.TransmissionPass)
 	}
-	if cfg.TransmissionDownloadDir != "/mnt/media/vr" {
-		t.Errorf("TransmissionDownloadDir = %q", cfg.TransmissionDownloadDir)
+	if cfg.TransmissionDownloadDir != "" {
+		t.Errorf("TransmissionDownloadDir = %q, want empty", cfg.TransmissionDownloadDir)
+	}
+	// Every value must be single-quoted (sed prints nothing for empty
+	// input, which once produced bare KEY= lines).
+	rawEnv, _ := os.ReadFile(dotenv)
+	for _, line := range strings.Split(string(rawEnv), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		_, val, ok := strings.Cut(line, "=")
+		if !ok || len(val) < 2 || !strings.HasPrefix(val, "'") || !strings.HasSuffix(val, "'") {
+			t.Errorf("unquoted .env line: %q", line)
+		}
 	}
 
 	// A second run (e.g. reinstall over existing data) keeps the user's file.

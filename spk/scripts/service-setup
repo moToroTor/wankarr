@@ -15,7 +15,14 @@ dotenv_quote()
 {
     # Quote $1 for the .env file: single quotes, newlines stripped
     # (wizard fields are single-line), embedded quotes escaped.
-    printf '%s' "$1" | tr -d '\r\n' | sed -e "s/'/'\\\\''/g" -e "s/^/'/" -e "s/$/'/"
+    clean=$(printf '%s' "$1" | tr -d '\r\n')
+    if [ -z "$clean" ]; then
+        # sed prints nothing for empty input (no lines in), so quote
+        # the empty case explicitly to keep every value quoted.
+        printf "''"
+    else
+        printf '%s' "$clean" | sed -e "s/'/'\\\\''/g" -e "s/^/'/" -e "s/$/'/"
+    fi
 }
 
 write_dotenv()
