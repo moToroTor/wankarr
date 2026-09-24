@@ -57,9 +57,13 @@ service_postinst()
 
 service_postupgrade()
 {
-    # The upgrade wizard pre-fills every box from the current .env, so
-    # submitting rewrites it with the shown values. If no wizard ran
-    # (required answers empty), keep the existing file untouched.
+    # With the DSM wizards parked (see mkspk), upgrades arrive with no
+    # wizard answers: keep an existing .env, but never leave the package
+    # without one — seed defaults the user then edits by hand.
+    if [ ! -f "${SYNOPKG_PKGVAR}/.env" ]; then
+        write_dotenv
+        return 0
+    fi
     if [ -z "${wizard_xbvr_url:-}" ] && [ -z "${wizard_rss_feeds:-}" ]; then
         return 0
     fi

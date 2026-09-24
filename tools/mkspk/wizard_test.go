@@ -315,4 +315,18 @@ func TestServicePostupgrade(t *testing.T) {
 	if string(kept) != original {
 		t.Errorf("wizard-less postupgrade rewrote .env:\n%s", kept)
 	}
+
+	// No wizard ran and no .env exists yet (e.g. upgrading the
+	// wizard-less v0.1.3): seed defaults so the package is configurable.
+	pkgvar2 := t.TempDir()
+	if err := runHook(pkgvar2, nil, "service_postupgrade"); err != nil {
+		t.Fatalf("seed postupgrade failed: %v", err)
+	}
+	seeded, err := config.Load(filepath.Join(pkgvar2, ".env"))
+	if err != nil {
+		t.Fatalf("seeded .env does not parse: %v", err)
+	}
+	if seeded.XBVRURL != "http://127.0.0.1:9999" {
+		t.Errorf("seeded XBVRURL = %q", seeded.XBVRURL)
+	}
 }
