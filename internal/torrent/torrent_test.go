@@ -141,6 +141,38 @@ func statusStub(t *testing.T, torrents []map[string]any) *httptest.Server {
 	}))
 }
 
+func TestFileNamesReturnsBasenames(t *testing.T) {
+	srv := statusStub(t, []map[string]any{
+		{"id": 7, "files": []map[string]any{
+			{"name": "Release Pack/video_4k.mp4", "length": 42},
+			{"name": "Release Pack/cover.jpg", "length": 7},
+			{"name": "loose.mkv", "length": 9},
+		}},
+	})
+	t.Cleanup(srv.Close)
+	got, err := NewTransmission(srv.URL, "", "").FileNames(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"video_4k.mp4", "cover.jpg", "loose.mkv"}
+	if len(got) != len(want) {
+		t.Fatalf("names = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("names[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFileNamesMissingTorrent(t *testing.T) {
+	srv := statusStub(t, nil)
+	t.Cleanup(srv.Close)
+	if _, err := NewTransmission(srv.URL, "", "").FileNames(7); err != ErrTorrentNotFound {
+		t.Errorf("err = %v, want ErrTorrentNotFound", err)
+	}
+}
+
 func TestStatusOfDone(t *testing.T) {
 	srv := statusStub(t, []map[string]any{
 		{"id": 7, "name": "Scene 8K", "percentDone": 1, "status": 6, "isFinished": true},

@@ -58,10 +58,15 @@ designed accordingly:
   credential-bearing enclosure URL server-side and calls Transmission
   `torrent-add` (with `download-dir` when `TRANSMISSION_DOWNLOAD_DIR` is
   set). Only the group ID is logged.
-- **Link-back**: sends that match a wishlist scene are tracked; every 5
-  minutes Wankarr polls Transmission, and once the torrent finishes it
-  calls XBVR's `rescan` task and links the new file to the scene
-  (`files/match` when auto-match misses). Non-wishlist sends stay
+- **Link-back**: when a send matches a wishlist scene, Wankarr registers
+  the torrent's inner video filenames on the scene's known-filenames
+  list (`scene/edit`), so XBVR's next library scan auto-matches them —
+  even when the downloaded names differ from the scraped release names.
+  Season-pack-sized torrents are skipped (episode names must not land on
+  one scene). Sends are also tracked; every 5 minutes Wankarr polls
+  Transmission, and once the torrent finishes it calls XBVR's `rescan`
+  task and links the new file to the scene (`files/match` when
+  auto-match misses) as a fallback. Non-wishlist sends stay
   fire-and-forget. Point `TRANSMISSION_DOWNLOAD_DIR` inside a path XBVR
   watches, or the rescan will never see the file.
 

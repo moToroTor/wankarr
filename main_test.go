@@ -210,6 +210,89 @@ func TestServeSendTracksWishlistPending(t *testing.T) {
 	}
 }
 
+// A wishlist send registers the grab's inner video filenames on the
+// scene, so the next XBVR scan auto-matches them.
+func TestServeSendSeedsFilenames(t *testing.T) {
+	trans := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method    string         `json:"method"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		if req.Method == "torrent-get" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": "success",
+				"arguments": map[string]any{"torrents": []map[string]any{{
+					"id": 7, "files": []map[string]any{
+						{"name": "Rainy City/rainy_city_8k.mp4", "length": 99},
+						{"name": "Rainy City/cover.jpg", "length": 1},
+					},
+				}}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result":    "success",
+			"arguments": map[string]any{"torrent-added": map[string]any{"name": "Scene 8K", "id": 7}},
+		})
+	}))
+	t.Cleanup(trans.Close)
+	var editBody map[string]any
+	xbvrSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/scene/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"results": 1,
+				"scenes": []map[string]any{{
+					"id": 9, "scene_id": "fp-1", "title": "Rainy City Rendezvous",
+					"site": "FuckPassVR", "filenames_arr": `["old.mp4"]`,
+				}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/scene/9":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 9, "title": "Rainy City Rendezvous", "site": "FuckPassVR",
+				"filenames_arr": `["old.mp4"]`,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/scene/edit/9":
+			if err := json.NewDecoder(r.Body).Decode(&editBody); err != nil {
+				t.Errorf("decode edit: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(xbvrSrv.Close)
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	seedSendItem(t, db)
+
+	cfg := &config.Config{TransmissionURL: trans.URL, XBVRURL: xbvrSrv.URL}
+	code, got := postSend(t, cfg, db)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %v", code, got)
+	}
+	if got["seeded_filenames"] != float64(1) {
+		t.Errorf("seeded_filenames = %v, want 1", got["seeded_filenames"])
+	}
+	var arr []string
+	if err := json.Unmarshal([]byte(editBody["filenames_arr"].(string)), &arr); err != nil {
+		t.Fatalf("filenames_arr: %v", err)
+	}
+	if len(arr) != 2 || arr[0] != "old.mp4" || arr[1] != "rainy_city_8k.mp4" {
+		t.Errorf("filenames_arr = %q, want old + new inner name", arr)
+	}
+	if editBody["title"] != "Rainy City Rendezvous" {
+		t.Errorf("edit dropped title: %v", editBody)
+	}
+}
+
 // A non-wishlist send stays fire-and-forget: no pending row.
 func TestServeSendNoPendingWithoutWishlistMatch(t *testing.T) {
 	transURL, xbvrURL := sendTestServers(t, nil)

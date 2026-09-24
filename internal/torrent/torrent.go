@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"time"
 )
 
@@ -76,11 +77,19 @@ type rpcResponse struct {
 // detect completion. Status follows Transmission's codes (4 =
 // downloading, 6 = seeding); Done is true for a finished torrent.
 type TorrentStatus struct {
-	ID          int     `json:"id"`
-	Name        string  `json:"name"`
-	PercentDone float64 `json:"percentDone"`
-	Status      int     `json:"status"`
-	IsFinished  bool    `json:"isFinished"`
+	ID          int           `json:"id"`
+	Name        string        `json:"name"`
+	PercentDone float64       `json:"percentDone"`
+	Status      int           `json:"status"`
+	IsFinished  bool          `json:"isFinished"`
+	Files       []TorrentFile `json:"files"`
+}
+
+// TorrentFile is one file inside a torrent. Name is torrent-root-relative
+// ("folder/video.mp4"); FileNames reduces entries to basenames.
+type TorrentFile struct {
+	Name   string `json:"name"`
+	Length int64  `json:"length"`
 }
 
 // Done reports a completed torrent: fully downloaded or seeding.
@@ -185,4 +194,27 @@ func (t *Transmission) StatusOf(id int) (TorrentStatus, error) {
 		return TorrentStatus{}, ErrTorrentNotFound
 	}
 	return out.Arguments.Torrents[0], nil
+}
+
+// FileNames lists a torrent's inner file basenames ("folder/video.mp4"
+// becomes "video.mp4"). Used to register downloaded names on the XBVR
+// scene so the next library scan auto-matches them.
+func (t *Transmission) FileNames(id int) ([]string, error) {
+	out, err := t.call("torrent-get", map[string]any{
+		"ids":    []int{id},
+		"fields": []string{"files"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(out.Arguments.Torrents) == 0 {
+		return nil, ErrTorrentNotFound
+	}
+	var names []string
+	for _, f := range out.Arguments.Torrents[0].Files {
+		if base := path.Base(f.Name); base != "" && base != "." && base != "/" {
+			names = append(names, base)
+		}
+	}
+	return names, nil
 }

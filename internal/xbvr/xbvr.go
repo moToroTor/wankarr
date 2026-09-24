@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -45,16 +47,20 @@ type Actor struct {
 
 // Scene mirrors the XBVR scene fields Wankarr needs.
 type Scene struct {
-	SceneID     string  `json:"scene_id"`
-	Title       string  `json:"title"`
-	Site        string  `json:"site"`
-	Studio      string  `json:"studio"`
-	ReleaseDate string  `json:"release_date"`
-	CoverURL    string  `json:"cover_url"`
-	Cast        []Actor `json:"cast"`
-	IsAvailable bool    `json:"is_available"`
-	Wishlist    bool    `json:"wishlist"`
-	Files       []File  `json:"file"`
+	// ID is XBVR's numeric database key (the edit endpoint's path).
+	// Encoding/json matches it case-insensitively on decode.
+	ID           uint    `json:"id"`
+	SceneID      string  `json:"scene_id"`
+	Title        string  `json:"title"`
+	Site         string  `json:"site"`
+	Studio       string  `json:"studio"`
+	ReleaseDate  string  `json:"release_date"`
+	CoverURL     string  `json:"cover_url"`
+	Cast         []Actor `json:"cast"`
+	IsAvailable  bool    `json:"is_available"`
+	Wishlist     bool    `json:"wishlist"`
+	Files        []File  `json:"file"`
+	FilenamesArr string  `json:"filenames_arr"`
 }
 
 // WantedScene is a wishlist entry: something to find on Emp.
@@ -65,6 +71,24 @@ type WantedScene struct {
 	Studio     string
 	CoverURL   string
 	Performers []string
+	// DBID is XBVR's numeric key for filename seeding (0 when unknown).
+	DBID uint
+	// KnownFilenames is the scene's scraped known-filenames snapshot.
+	KnownFilenames []string
+}
+
+// parseFilenamesArr decodes XBVR's JSON-encoded known-filenames string.
+// Lenient: a missing or corrupt value yields nil; the authoritative
+// merge in SeedFilenames re-reads and refuses to clobber corrupt data.
+func parseFilenamesArr(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // OwnedScene pairs a library scene with its best local resolution height
@@ -102,7 +126,7 @@ func (c *Client) ListWishlist() ([]WantedScene, error) {
 					performers = append(performers, a.Name)
 				}
 			}
-			out = append(out, WantedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, Studio: s.Studio, CoverURL: s.CoverURL, Performers: performers})
+			out = append(out, WantedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, Studio: s.Studio, CoverURL: s.CoverURL, Performers: performers, DBID: s.ID, KnownFilenames: parseFilenamesArr(s.FilenamesArr)})
 		}
 		if len(resp.Scenes) < page {
 			break
@@ -179,6 +203,79 @@ func (c *Client) MatchFile(sceneID string, fileID uint) error {
 	body, _ := json.Marshal(map[string]any{"scene_id": sceneID, "file_id": fileID})
 	var dst any
 	return c.post("/api/files/match", body, &dst)
+}
+
+func (c *Client) getJSON(path string, dst any) error {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("xbvr GET %s: %w", path, err)
+	}
+	defer res.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 64<<20))
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("xbvr GET %s: status %d", path, res.StatusCode)
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		return fmt.Errorf("xbvr GET %s: decode: %w", path, err)
+	}
+	return nil
+}
+
+// SeedFilenames registers names (a grab's inner video-file basenames) on
+// the scene's known-filenames list, so XBVR's next library scan
+// auto-matches them even when the downloaded names differ from the
+// scraped release names. It round-trips the full scene object: the edit
+// endpoint overwrites every field it receives, so a partial update would
+// wipe the rest. Returns how many names were added. A corrupt stored
+// list is refused rather than clobbered.
+func (c *Client) SeedFilenames(dbid uint, names []string) (int, error) {
+	if dbid == 0 || len(names) == 0 {
+		return 0, nil
+	}
+	var scene map[string]any
+	if err := c.getJSON("/api/scene/"+strconv.FormatUint(uint64(dbid), 10), &scene); err != nil {
+		return 0, err
+	}
+	var known []string
+	if raw, ok := scene["filenames_arr"].(string); ok && strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &known); err != nil {
+			return 0, fmt.Errorf("xbvr scene %d: filenames_arr: %w", dbid, err)
+		}
+	}
+	have := map[string]bool{}
+	for _, k := range known {
+		have[k] = true
+	}
+	added := 0
+	for _, n := range names {
+		if n == "" || have[n] {
+			continue
+		}
+		known = append(known, n)
+		have[n] = true
+		added++
+	}
+	if added == 0 {
+		return 0, nil
+	}
+	enc, err := json.Marshal(known)
+	if err != nil {
+		return 0, err
+	}
+	scene["filenames_arr"] = string(enc)
+	body, _ := json.Marshal(scene)
+	var dst any
+	if err := c.post("/api/scene/edit/"+strconv.FormatUint(uint64(dbid), 10), body, &dst); err != nil {
+		return 0, err
+	}
+	return added, nil
 }
 
 func (c *Client) get(path string) error {

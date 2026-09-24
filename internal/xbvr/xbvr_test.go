@@ -60,6 +60,85 @@ func TestListOwnedPicksBestHeight(t *testing.T) {
 	}
 }
 
+// seedStub serves scene detail plus a capturing edit endpoint.
+func seedStub(t *testing.T, scene map[string]any) (*Client, *int, *map[string]any) {
+	t.Helper()
+	var edits int
+	var last map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/scene/9":
+			_ = json.NewEncoder(w).Encode(scene)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/scene/edit/9":
+			edits++
+			if err := json.NewDecoder(r.Body).Decode(&last); err != nil {
+				t.Errorf("decode edit: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(srv.URL), &edits, &last
+}
+
+// SeedFilenames merges missing names into the scene's known-filenames
+// and posts the full object back (partial posts would wipe XBVR fields).
+func TestSeedFilenamesMerges(t *testing.T) {
+	c, edits, last := seedStub(t, map[string]any{
+		"id": 9, "title": "Rainy City Rendezvous", "site": "FuckPassVR",
+		"filenames_arr": `["old.mp4"]`,
+	})
+	added, err := c.SeedFilenames(9, []string{"old.mp4", "new_4k.mp4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 1 {
+		t.Errorf("added = %d, want 1", added)
+	}
+	if *edits != 1 {
+		t.Fatalf("edits = %d, want 1", *edits)
+	}
+	var arr []string
+	if err := json.Unmarshal([]byte((*last)["filenames_arr"].(string)), &arr); err != nil {
+		t.Fatalf("filenames_arr: %v", err)
+	}
+	if len(arr) != 2 || arr[0] != "old.mp4" || arr[1] != "new_4k.mp4" {
+		t.Errorf("filenames_arr = %q, want old+new", arr)
+	}
+	if (*last)["title"] != "Rainy City Rendezvous" || (*last)["site"] != "FuckPassVR" {
+		t.Errorf("edit dropped scene fields: %v", *last)
+	}
+}
+
+// Nothing new to register means no edit call at all.
+func TestSeedFilenamesNoopWhenKnown(t *testing.T) {
+	c, edits, _ := seedStub(t, map[string]any{
+		"id": 9, "filenames_arr": `["a.mp4"]`,
+	})
+	added, err := c.SeedFilenames(9, []string{"a.mp4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 0 || *edits != 0 {
+		t.Errorf("added = %d, edits = %d; want no edit", added, *edits)
+	}
+}
+
+// A corrupt stored list is refused, never clobbered.
+func TestSeedFilenamesRefusesCorrupt(t *testing.T) {
+	c, edits, _ := seedStub(t, map[string]any{
+		"id": 9, "filenames_arr": `["broken`,
+	})
+	if _, err := c.SeedFilenames(9, []string{"new.mp4"}); err == nil {
+		t.Error("expected error on corrupt filenames_arr, got nil")
+	}
+	if *edits != 0 {
+		t.Errorf("edits = %d, want 0", *edits)
+	}
+}
+
 func TestServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)

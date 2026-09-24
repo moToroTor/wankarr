@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -467,38 +468,105 @@ func serveSend(cfg *config.Config, db *store.DB, w http.ResponseWriter, r *http.
 	// Wishlist grabs get completion tracking: once Transmission
 	// finishes, the file is linked into its XBVR scene. Plain
 	// (non-wishlist) sends stay fire-and-forget.
-	if sceneID, sceneTitle := wishlistSceneForGroup(db, xbvr.NewClient(cfg.XBVRURL), req.GroupID); sceneID != "" {
-		if _, err := db.AddPending(tid, name, req.GroupID, sceneID, sceneTitle); err != nil {
+	xc := xbvr.NewClient(cfg.XBVRURL)
+	if want := wishlistSceneForGroup(db, xc, req.GroupID); want != nil {
+		if _, err := db.AddPending(tid, name, req.GroupID, want.SceneID, want.Title); err != nil {
 			log.Printf("send group %s: pending track: %v", req.GroupID, err)
 		} else {
-			log.Printf("send group %s: tracking completion for scene %s", req.GroupID, sceneID)
-			resp["wishlist_scene"] = sceneID
+			log.Printf("send group %s: tracking completion for scene %s", req.GroupID, want.SceneID)
+			resp["wishlist_scene"] = want.SceneID
+		}
+		if n := seedSceneFilenames(tc, xc, want, tid); n > 0 {
+			resp["seeded_filenames"] = n
 		}
 	}
 	writeJSON(w, resp)
 }
 
 // wishlistSceneForGroup returns the best wishlist scene for a group ID
-// (match score >= 0.6), or "" when the group is not a wishlist grab or
+// (match score >= 0.6), or nil when the group is not a wishlist grab or
 // XBVR is unreachable. Best-effort: never fails the send.
-func wishlistSceneForGroup(db *store.DB, xc *xbvr.Client, groupID string) (string, string) {
+func wishlistSceneForGroup(db *store.DB, xc *xbvr.Client, groupID string) *xbvr.WantedScene {
 	it, err := db.GetItem(groupID)
 	if err != nil {
-		return "", ""
+		return nil
 	}
 	wishlist, err := xc.ListWishlist()
 	if err != nil {
 		log.Printf("send group %s: wishlist unavailable: %v", groupID, err)
-		return "", ""
+		return nil
 	}
 	key := emp.GroupKey(it.Title)
-	bestID, bestTitle, best := "", "", 0.0
-	for _, want := range wishlist {
-		if s := match.Score(key, want); s >= 0.6 && s > best {
-			bestID, bestTitle, best = want.SceneID, want.Title, s
+	var best *xbvr.WantedScene
+	score := 0.0
+	for i := range wishlist {
+		if s := match.Score(key, wishlist[i]); s >= 0.6 && s > score {
+			best, score = &wishlist[i], s
 		}
 	}
-	return bestID, bestTitle
+	return best
+}
+
+// maxSeedFiles caps filename seeding: movies ship a handful of video
+// files, while season packs ship dozens per scene — registering every
+// episode name onto one scene would mislink them. Packs keep the
+// completion poller as their link path.
+const maxSeedFiles = 5
+
+func isVideoFile(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".mp4", ".mkv", ".avi", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg",
+		".m2ts", ".ts", ".webm", ".3gp", ".ogv":
+		return true
+	}
+	return false
+}
+
+// seedSceneFilenames registers the grab's inner video filenames on the
+// wishlist scene's known-filenames list, so XBVR's next library scan
+// auto-matches them even when the downloaded names differ from the
+// scraped release names. Returns names added. Best-effort: logs and
+// returns 0 on anything unexpected, never fails the send.
+func seedSceneFilenames(tc *torrent.Transmission, xc *xbvr.Client, want *xbvr.WantedScene, tid int) int {
+	if want.DBID == 0 {
+		return 0
+	}
+	names, err := tc.FileNames(tid)
+	if err != nil {
+		log.Printf("send group: scene %s: torrent files: %v", want.SceneID, err)
+		return 0
+	}
+	var videos []string
+	for _, n := range names {
+		if isVideoFile(n) {
+			videos = append(videos, n)
+		}
+	}
+	if len(videos) == 0 || len(videos) > maxSeedFiles {
+		return 0
+	}
+	known := map[string]bool{}
+	for _, k := range want.KnownFilenames {
+		known[k] = true
+	}
+	var fresh []string
+	for _, v := range videos {
+		if !known[v] {
+			fresh = append(fresh, v)
+		}
+	}
+	if len(fresh) == 0 {
+		return 0
+	}
+	added, err := xc.SeedFilenames(want.DBID, fresh)
+	if err != nil {
+		log.Printf("send group: scene %s: seed filenames: %v", want.SceneID, err)
+		return 0
+	}
+	if added > 0 {
+		log.Printf("send group: scene %s: registered %d filename(s) for next scan", want.SceneID, added)
+	}
+	return added
 }
 
 // Completion polling for wishlist grabs. Runs every few minutes:
