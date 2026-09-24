@@ -102,6 +102,7 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 		{Name: "INFO", Mode: 0o644, Data: []byte(info)},
 		{Name: "scripts", Mode: 0o755, Dir: true},
 		{Name: "conf", Mode: 0o755, Dir: true},
+		{Name: "WIZARD_UIFILES", Mode: 0o755, Dir: true},
 		{Name: "PACKAGE_ICON.PNG", Mode: 0o644, Data: mustRead(filepath.Join(iconDir, "PACKAGE_ICON.PNG"))},
 		{Name: "PACKAGE_ICON_256.PNG", Mode: 0o644, Data: mustRead(filepath.Join(iconDir, "PACKAGE_ICON_256.PNG"))},
 		{Name: "package.tgz", Mode: 0o644, Data: mustRead(pkgTgz)},
@@ -109,6 +110,7 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 		{Name: "scripts/start-stop-status", Mode: 0o755, Data: read("scripts/start-stop-status")},
 		{Name: "scripts/service-setup", Mode: 0o644, Data: read("scripts/service-setup")},
 		{Name: "conf/privilege", Mode: 0o644, Data: read("conf/privilege")},
+		{Name: "WIZARD_UIFILES/install_uifile", Mode: 0o755, Data: read("WIZARD_UIFILES/install_uifile")},
 	}
 	// The outer .spk is a plain (uncompressed) tar like SynoCommunity
 	// builds; only the inner package.tgz is gzipped. DSM rejects a

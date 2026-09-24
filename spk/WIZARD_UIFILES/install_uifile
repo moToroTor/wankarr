@@ -1,0 +1,82 @@
+[{
+    "step_title": "Media servers",
+    "items": [{
+        "type": "textfield",
+        "desc": "Where Wankarr reads your library and sends downloads.",
+        "subitems": [{
+            "key": "wizard_xbvr_url",
+            "desc": "XBVR URL",
+            "defaultValue": "http://127.0.0.1:9999",
+            "validator": {"allowBlank": false}
+        }]
+    }, {
+        "type": "textfield",
+        "desc": "Transmission RPC endpoint (runs on this NAS).",
+        "subitems": [{
+            "key": "wizard_transmission_url",
+            "desc": "Transmission URL",
+            "defaultValue": "http://127.0.0.1:9091/transmission/rpc",
+            "validator": {"allowBlank": false}
+        }]
+    }, {
+        "type": "textfield",
+        "desc": "Leave user and password empty if Transmission has no auth configured.",
+        "subitems": [{
+            "key": "wizard_transmission_user",
+            "desc": "Transmission user (optional)",
+            "defaultValue": ""
+        }]
+    }, {
+        "type": "password",
+        "desc": "Stored only in the package's private .env file.",
+        "subitems": [{
+            "key": "wizard_transmission_pass",
+            "desc": "Transmission password (optional)",
+            "defaultValue": ""
+        }]
+    }, {
+        "type": "textfield",
+        "desc": "Must exist and be writable by Transmission. Empty = server default.",
+        "subitems": [{
+            "key": "wizard_transmission_dir",
+            "desc": "Download directory override (optional)",
+            "defaultValue": ""
+        }]
+    }]
+}, {
+    "step_title": "Tracker access",
+    "items": [{
+        "type": "password",
+        "desc": "Private RSS notification feed URL(s) from the tracker. Comma-separated if more than one. The URL itself carries the auth, so it is asked as a password.",
+        "subitems": [{
+            "key": "wizard_rss_feeds",
+            "desc": "RSS feed URL(s)",
+            "defaultValue": "",
+            "validator": {"allowBlank": false}
+        }]
+    }, {
+        "type": "textfield",
+        "desc": "Jackett server for on-demand searches (runs on this NAS). Optional.",
+        "subitems": [{
+            "key": "wizard_jackett_url",
+            "desc": "Jackett URL (optional)",
+            "defaultValue": "http://127.0.0.1:9117"
+        }]
+    }, {
+        "type": "password",
+        "desc": "From the Jackett dashboard, top-right. Optional.",
+        "subitems": [{
+            "key": "wizard_jackett_api_key",
+            "desc": "Jackett API key (optional)",
+            "defaultValue": ""
+        }]
+    }, {
+        "type": "textfield",
+        "desc": "Comma-separated if more than one. Per indexer: Jackett dashboard, indexer, Torznab feed.",
+        "subitems": [{
+            "key": "wizard_torznab_paths",
+            "desc": "Torznab indexer path(s)",
+            "defaultValue": "/api/v2.0/indexers/empornium/results/torznab/"
+        }]
+    }]
+}]
