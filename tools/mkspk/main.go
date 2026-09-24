@@ -110,7 +110,8 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 		{Name: "scripts/start-stop-status", Mode: 0o755, Data: read("scripts/start-stop-status")},
 		{Name: "scripts/service-setup", Mode: 0o644, Data: read("scripts/service-setup")},
 		{Name: "conf/privilege", Mode: 0o644, Data: read("conf/privilege")},
-		{Name: "WIZARD_UIFILES/install_uifile", Mode: 0o755, Data: read("WIZARD_UIFILES/install_uifile")},
+		{Name: "WIZARD_UIFILES/install_uifile.sh", Mode: 0o755, Data: read("WIZARD_UIFILES/install_uifile.sh")},
+		{Name: "WIZARD_UIFILES/upgrade_uifile.sh", Mode: 0o755, Data: read("WIZARD_UIFILES/upgrade_uifile.sh")},
 	}
 	// The outer .spk is a plain (uncompressed) tar like SynoCommunity
 	// builds; only the inner package.tgz is gzipped. DSM rejects a
