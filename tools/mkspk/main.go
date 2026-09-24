@@ -116,6 +116,10 @@ func run(binary, arch, version, rev, fw, spkDir, envExample, out string) error {
 		{Name: "WIZARD_UIFILES/install_uifile.sh", Mode: 0o755, Data: read("WIZARD_UIFILES/install_uifile.sh")},
 		{Name: "WIZARD_UIFILES/upgrade_uifile.sh", Mode: 0o755, Data: read("WIZARD_UIFILES/upgrade_uifile.sh")},
 	}
+	// DSM's upgrader requires the per-action scripts to exist as files
+	// beside the installer dispatcher; without preupgrade/postupgrade
+	// installs fail with error 261.
+	files = append(files, dsmActionScripts(read)...)
 	// The outer .spk is a plain (uncompressed) tar like SynoCommunity
 	// builds; only the inner package.tgz is gzipped. DSM rejects a
 	// gzipped outer package as "Invalid file format".
@@ -144,6 +148,18 @@ type tarFile struct {
 	Mode int64
 	Data []byte
 	Dir  bool
+}
+
+// dsmActionScripts returns the per-action entry-point scripts DSM requires
+// alongside the installer dispatcher.
+func dsmActionScripts(read func(string) []byte) []tarFile {
+	var out []tarFile
+	for _, a := range []string{
+		"preinst", "postinst", "preuninst", "postuninst", "preupgrade", "postupgrade",
+	} {
+		out = append(out, tarFile{Name: "scripts/" + a, Mode: 0o755, Data: read("scripts/" + a)})
+	}
+	return out
 }
 
 // genIcons runs the icon generator into dir, locating the module root by
