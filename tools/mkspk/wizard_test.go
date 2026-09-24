@@ -163,6 +163,37 @@ func TestUpgradeWizardPrefill(t *testing.T) {
 	}
 }
 
+// The installer must propagate hook failures instead of masking them
+// behind exit 0 (a masked postinst once hid a missing .env), while hooks
+// that don't exist must still succeed.
+func TestInstallerPropagatesFailure(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	scripts := filepath.Join(spkDir(t), "scripts")
+
+	runInstaller := func(args []string, pkgvar string) error {
+		cmd := exec.Command("sh", append([]string{"./installer"}, args...)...)
+		cmd.Dir = scripts
+		cmd.Env = []string{"SYNOPKG_PKGVAR=" + pkgvar, "PATH=/usr/bin:/bin"}
+		return cmd.Run()
+	}
+
+	// preinst has no hook: must succeed.
+	if err := runInstaller([]string{"preinst"}, t.TempDir()); err != nil {
+		t.Errorf("preinst without hook failed: %v", err)
+	}
+	// postinst pointed at a regular file (not a dir): mkdir and the .env
+	// write both fail, and the installer must report failure.
+	blocker := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInstaller([]string{"postinst"}, blocker); err == nil {
+		t.Error("postinst with unwritable PKGVAR succeeded; want failure")
+	}
+}
+
 // service_postinst must turn wizard answers into a .env the config loader
 // accepts, quoting values that would otherwise break dotenv parsing, and
 // must never overwrite an existing .env.
@@ -317,8 +348,9 @@ func TestServicePostupgrade(t *testing.T) {
 	}
 
 	// No wizard ran and no .env exists yet (e.g. upgrading the
-	// wizard-less v0.1.3): seed defaults so the package is configurable.
-	pkgvar2 := t.TempDir()
+	// wizard-less v0.1.3): seed defaults so the package is configurable,
+	// creating the var dir if needed.
+	pkgvar2 := filepath.Join(t.TempDir(), "nosuchdir")
 	if err := runHook(pkgvar2, nil, "service_postupgrade"); err != nil {
 		t.Fatalf("seed postupgrade failed: %v", err)
 	}

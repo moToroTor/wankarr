@@ -13,35 +13,42 @@ call_func()
     FUNC="$1"
     if type "${FUNC}" 2>/dev/null | grep -q 'function' 2>/dev/null; then
         eval "${FUNC}"
+    else
+        # Absent hook counts as success; without this the caller's
+        # `exit $?` below would inherit grep's nonzero status.
+        return 0
     fi
 }
 
+# Propagate hook status: a failing postinst/postupgrade must fail the
+# install loudly. (An unconditional `exit 0` here once hid a failed .env
+# write behind a "successful" install.)
 case $1 in
     preinst)
         call_func "service_preinst"
-        exit 0
+        exit $?
         ;;
     postinst)
         call_func "service_postinst"
-        exit 0
+        exit $?
         ;;
     preuninst)
         call_func "service_preuninst"
-        exit 0
+        exit $?
         ;;
     postuninst)
         # Keep var/ (.env, wankarr.db) on uninstall; DSM removes it only
         # when the user ticks "remove data". Nothing to do here.
         call_func "service_postuninst"
-        exit 0
+        exit $?
         ;;
     preupgrade)
         call_func "service_preupgrade"
-        exit 0
+        exit $?
         ;;
     postupgrade)
         call_func "service_postupgrade"
-        exit 0
+        exit $?
         ;;
 esac
 exit 1
