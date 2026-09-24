@@ -4,8 +4,10 @@
 # wizard JSON it writes to ${SYNOPKG_TEMP_LOGFILE}. Fresh installs have
 # no .env yet, so defaults are the built-in ones.
 #
-# Values are substituted via bash replacement (not heredoc expansion)
-# so JSON escaping survives verbatim.
+# Pages are built by concatenating single-quoted literals with
+# double-quoted values: concatenation passes values through byte-for-byte
+# on every bash (unlike ${//} substitution, which collapses backslashes
+# on bash 4+). quote_json makes values JSON-safe first.
 
 quote_json()
 {
@@ -22,8 +24,7 @@ JK_URL=$(quote_json "${wizard_jackett_url:-http://127.0.0.1:9117}")
 JK_KEY=$(quote_json "${wizard_jackett_api_key:-}")
 TORZNAB=$(quote_json "${wizard_torznab_paths:-/api/v2.0/indexers/empornium/results/torznab/}")
 
-PAGE_MEDIA=$(/bin/cat<<'EOF'
-{
+PAGE_MEDIA='{
     "step_title": "Media servers",
     "items": [{
         "type": "textfield",
@@ -31,7 +32,7 @@ PAGE_MEDIA=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_xbvr_url",
             "desc": "XBVR URL",
-            "defaultValue": "__XBVR_URL__",
+            "defaultValue": "'"$XBVR_URL"'",
             "validator": {"allowBlank": false}
         }]
     }, {
@@ -40,7 +41,7 @@ PAGE_MEDIA=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_transmission_url",
             "desc": "Transmission URL",
-            "defaultValue": "__TR_URL__",
+            "defaultValue": "'"$TR_URL"'",
             "validator": {"allowBlank": false}
         }]
     }, {
@@ -49,15 +50,15 @@ PAGE_MEDIA=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_transmission_user",
             "desc": "Transmission user (optional)",
-            "defaultValue": "__TR_USER__"
+            "defaultValue": "'"$TR_USER"'"
         }]
     }, {
         "type": "password",
-        "desc": "Stored only in the package's private .env file.",
+        "desc": "Stored only in the package'\''s private .env file.",
         "subitems": [{
             "key": "wizard_transmission_pass",
             "desc": "Transmission password (optional)",
-            "defaultValue": "__TR_PASS__"
+            "defaultValue": "'"$TR_PASS"'"
         }]
     }, {
         "type": "textfield",
@@ -65,15 +66,12 @@ PAGE_MEDIA=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_transmission_dir",
             "desc": "Download directory override (optional)",
-            "defaultValue": "__TR_DIR__"
+            "defaultValue": "'"$TR_DIR"'"
         }]
     }]
-}
-EOF
-)
+}'
 
-PAGE_TRACKER=$(/bin/cat<<'EOF'
-{
+PAGE_TRACKER='{
     "step_title": "Tracker access",
     "items": [{
         "type": "password",
@@ -81,7 +79,7 @@ PAGE_TRACKER=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_rss_feeds",
             "desc": "RSS feed URL(s)",
-            "defaultValue": "__RSS_FEEDS__",
+            "defaultValue": "'"$RSS_FEEDS"'",
             "validator": {"allowBlank": false}
         }]
     }, {
@@ -90,7 +88,7 @@ PAGE_TRACKER=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_jackett_url",
             "desc": "Jackett URL (optional)",
-            "defaultValue": "__JK_URL__"
+            "defaultValue": "'"$JK_URL"'"
         }]
     }, {
         "type": "password",
@@ -98,7 +96,7 @@ PAGE_TRACKER=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_jackett_api_key",
             "desc": "Jackett API key (optional)",
-            "defaultValue": "__JK_KEY__"
+            "defaultValue": "'"$JK_KEY"'"
         }]
     }, {
         "type": "textfield",
@@ -106,25 +104,14 @@ PAGE_TRACKER=$(/bin/cat<<'EOF'
         "subitems": [{
             "key": "wizard_torznab_paths",
             "desc": "Torznab indexer path(s)",
-            "defaultValue": "__TORZNAB__"
+            "defaultValue": "'"$TORZNAB"'"
         }]
     }]
-}
-EOF
-)
+}'
 
 main()
 {
-    PAGE_MEDIA=${PAGE_MEDIA//__XBVR_URL__/$XBVR_URL}
-    PAGE_MEDIA=${PAGE_MEDIA//__TR_URL__/$TR_URL}
-    PAGE_MEDIA=${PAGE_MEDIA//__TR_USER__/$TR_USER}
-    PAGE_MEDIA=${PAGE_MEDIA//__TR_PASS__/$TR_PASS}
-    PAGE_MEDIA=${PAGE_MEDIA//__TR_DIR__/$TR_DIR}
-    PAGE_TRACKER=${PAGE_TRACKER//__RSS_FEEDS__/$RSS_FEEDS}
-    PAGE_TRACKER=${PAGE_TRACKER//__JK_URL__/$JK_URL}
-    PAGE_TRACKER=${PAGE_TRACKER//__JK_KEY__/$JK_KEY}
-    PAGE_TRACKER=${PAGE_TRACKER//__TORZNAB__/$TORZNAB}
-    echo "[$PAGE_MEDIA,$PAGE_TRACKER]" > "${SYNOPKG_TEMP_LOGFILE}"
+    printf '[%s,%s]\n' "$PAGE_MEDIA" "$PAGE_TRACKER" > "${SYNOPKG_TEMP_LOGFILE}"
 }
 
 main "$@"
