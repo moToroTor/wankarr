@@ -38,6 +38,16 @@ var stopwords = map[string]bool{
 // containing that word — zero identifying power, pure false positives.
 const minTitleTokens = 2
 
+// minJaccard is the minimum token-set overlap symmetry for a match:
+// hit tokens over the union of title and key tokens. Recall alone
+// passes performer-name collisions (a compilation key contains the
+// performer's solo-scene words), generic-word overlap ("Body To Body"
+// vs "Study My Body"), series confusion ("Tron" vs "Buffy" parodies),
+// and template similarity — all share few tokens with the long key.
+// Genuine full-title matches score 0.5–1.0 here; the worst observed
+// false positive scores 0.44.
+const minJaccard = 0.5
+
 // Score rates an Emp group key against a wanted scene. All significant
 // tokens of the XBVR title must appear in the group key for a nonzero
 // score; a studio/site token match adds a bonus.
@@ -64,6 +74,9 @@ func ScoreTitle(groupKey, title, site, studio string) float64 {
 		}
 	}
 	if hit == 0 {
+		return 0
+	}
+	if float64(hit)/float64(len(titleToks)+len(keySet)-hit) < minJaccard {
 		return 0
 	}
 	score := float64(hit) / float64(len(titleToks))
@@ -161,6 +174,9 @@ func (l Library) Best(groupKey string, threshold float64) (height int, title str
 			}
 		}
 		if hit == 0 {
+			continue
+		}
+		if float64(hit)/float64(len(toks)+len(keySet)-hit) < minJaccard {
 			continue
 		}
 		score := float64(hit) / float64(len(toks))

@@ -69,6 +69,49 @@ func TestSingleTokenTitleNeverMatches(t *testing.T) {
 	}
 }
 
+// Reported false positives: high recall against long keys via performer
+// names, generic words, series templates, and site-bonus pushes — all
+// sharing little with the key itself. The Jaccard floor rejects them.
+func TestReportedFalsePositivesRejected(t *testing.T) {
+	cases := []struct {
+		name       string
+		groupTitle string
+		owned      xbvr.OwnedScene
+	}{
+		// Performer collision: compilation key holds the performer's name.
+		{"performer", "[FuckPassVR] Payton Preslee, Lily Starfire, Lauren Phillips, Skylar Snow, Lexi Luv, Sarah Arabic, Jennifer Mendez (Best Curvy Cowgirl Adventures Vol.1) [180°, 8k, 4096, Oculus Rift / Vive]",
+			xbvr.OwnedScene{Title: "Lauren Phillips : Lauren Loves Anal", Site: "FuckPassVR"}},
+		// Same performer, different scene.
+		{"same performer", "PassthroughVR - Dream Cumming True - Lauren Phillips (2026.04.03) (Oculus 8K)",
+			xbvr.OwnedScene{Title: "Lauren Phillips : Lauren Loves Anal", Site: "PassthroughVR"}},
+		// Generic-word overlap at 2/3 recall.
+		{"generic words", "[Virtual Papi] Maya Rose (French Little Slut) [VR, 60 FPS, 180°, 8K, 3840p] [Oculus Rift / Vive]",
+			xbvr.OwnedScene{Title: "Little Slut Diaries", Site: "Virtual Papi"}},
+		// Perfect recall on generic words alone.
+		{"generic perfect recall", "[VRXClouds] Lesly Clap (She Shows Off Her Ass, and He Fucks Her Twice in a Row) [VR, 60 FPS, 180°, 8K, 3840p] [Oculus Rift / Vive]",
+			xbvr.OwnedScene{Title: "On Her Ass", Site: "VRXClouds"}},
+		// Series confusion: different parody, same studio template.
+		{"series", "VRCosplayX - Buffy: Faith A XXX Parody - Serena Hill (2026.09.24) (Oculus 8K)",
+			xbvr.OwnedScene{Title: "Tron A XXX Parody", Site: "VRCosplayX"}},
+		// Template similarity at 0.8 recall.
+		{"template", "ARPorn - Scratch Me If You Can - Aleksa Mink (2026.09.25) (Oculus 8K)",
+			xbvr.OwnedScene{Title: "Fuck Me If You Can", Site: "ARPorn"}},
+		// Site bonus pushing sub-threshold recall over the line.
+		{"bonus push", "SLROriginals - Earn the Deal - Melissa Stratton (2026.09.23) (Oculus 4K)",
+			xbvr.OwnedScene{Title: "Closing A Deal", Site: "SLROriginals"}},
+	}
+	for _, tc := range cases {
+		key := emp.GroupKey(tc.groupTitle)
+		if s := ScoreTitle(key, tc.owned.Title, tc.owned.Site, ""); s != 0 {
+			t.Errorf("%s: ScoreTitle = %v, want 0", tc.name, s)
+		}
+		lib := IndexLibrary([]xbvr.OwnedScene{tc.owned})
+		if _, _, ok := lib.Best(key, 0.6); ok {
+			t.Errorf("%s: index matched, want false", tc.name)
+		}
+	}
+}
+
 func TestScoreRejectsUnrelated(t *testing.T) {
 	key := emp.GroupKey("VRCosplayX - The Legend of Vox Machina: Keyleth A XXX Parody - Gracey Snow (2026.09.17) (Oculus 8K)")
 	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"}
