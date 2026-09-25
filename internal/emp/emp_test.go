@@ -252,6 +252,55 @@ func TestGroupKeyStripsVariantParenthetical(t *testing.T) {
 	}
 }
 
+// Reported bug: a bare "2K" outside any parenthetical survived in the
+// group key and leaked into the Find-versions Jackett query, hiding the
+// 4K/8K uploads of the same scene.
+func TestGroupKeyStripsBareResolution(t *testing.T) {
+	cases := []struct{ title, want string }{
+		{"[Virtual Papi] SfizyDyd (Next Door Peep) 2K", "[virtual papi] sfizydyd (next door peep)"},
+		{"Studio - Scene Name 4096p", "studio - scene name"},
+		{"Studio - Scene Name UHD", "studio - scene name"},
+		{"Studio - Scene Name 2K,", "studio - scene name"},
+	}
+	for _, tc := range cases {
+		if got := GroupKey(tc.title); got != tc.want {
+			t.Errorf("GroupKey(%q) = %q, want %q", tc.title, got, tc.want)
+		}
+	}
+	// A title that is only a resolution token keeps it (never empty).
+	if got := GroupKey("8K"); got != "8k" {
+		t.Errorf("GroupKey(%q) = %q, want %q", "8K", got, "8k")
+	}
+}
+
+// Same scene uploaded at two bare resolutions clusters into one group.
+func TestGroupClustersBareResolutionVariants(t *testing.T) {
+	mk := func(id, title string) store.Item {
+		return store.Item{GroupID: id, Title: title,
+			Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30,
+			PubDate: time.Now().UTC(), FetchedAt: time.Now().UTC()}
+	}
+	groups := Group([]store.Item{
+		mk("a", "[Virtual Papi] SfizyDyd (Next Door Peep) 2K"),
+		mk("b", "[Virtual Papi] SfizyDyd (Next Door Peep) 4K"),
+	})
+	if len(groups) != 1 {
+		keys := []string{}
+		for k := range groups {
+			keys = append(keys, k)
+		}
+		t.Fatalf("groups = %d %v, want 1 (resolutions cluster)", len(groups), keys)
+	}
+	for k, vs := range groups {
+		if k != "[virtual papi] sfizydyd (next door peep)" {
+			t.Errorf("key = %q, want resolution-free key", k)
+		}
+		if len(vs) != 2 {
+			t.Errorf("variants = %d, want 2", len(vs))
+		}
+	}
+}
+
 // Reported bug: a Jackett-sourced "(Oculus 8K, HQ)" upload arrived with
 // no usable tags (only the Torznab category) and was shown without the
 // HBR badge. Title tokens must backstop the tag check.

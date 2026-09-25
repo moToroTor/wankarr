@@ -64,10 +64,13 @@ func Score(groupKey string, w xbvr.WantedScene) float64 {
 	return score
 }
 
+// significant drops generic tokens (stopwords) and bare resolution
+// tokens: a "4K" in the XBVR title must not demand a "4k" in the group
+// key, which no longer carries resolution signals at all.
 func significant(toks []string) []string {
 	var out []string
 	for _, t := range toks {
-		if !stopwords[t] {
+		if !stopwords[t] && !emp.ResToken.MatchString(t) {
 			out = append(out, t)
 		}
 	}

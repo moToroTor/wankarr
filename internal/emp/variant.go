@@ -38,18 +38,37 @@ type Variant struct {
 	Codec      string // "h265", "h264", or "av1" when tagged, else ""
 }
 
+// ResToken spots bare resolution tokens ("2K", "4096p", "UHD") on
+// lowercased title tokens. They are variant signals, not scene identity:
+// uploaders append them outside the variant parenthetical.
+var ResToken = regexp.MustCompile(`^(\d{3,4}p|[24568]k|uhd|fhd|qhd|hd|sd)$`)
+
 // GroupKey normalizes a title for clustering: the scene identity is the
-// title minus the trailing variant parenthetical ("(Oculus 8K, UHD)").
+// title minus the trailing variant parenthetical ("(Oculus 8K, UHD)")
+// and minus bare resolution tokens ("2K", "4096p"). The key doubles as
+// the Find-versions Jackett query, so a lingering "2K" would hide the
+// 4K/8K uploads of the same scene.
 func GroupKey(title string) string {
 	key := strings.TrimSpace(title)
 	for {
 		next := trailingVariantRe.ReplaceAllString(key, "")
 		next = strings.TrimSpace(next)
 		if next == key {
-			return strings.ToLower(next)
+			break
 		}
 		key = next
 	}
+	lower := strings.ToLower(key)
+	var toks []string
+	for _, t := range strings.Fields(lower) {
+		if !ResToken.MatchString(strings.Trim(t, ",;:.!?")) {
+			toks = append(toks, t)
+		}
+	}
+	if len(toks) == 0 {
+		return lower
+	}
+	return strings.Join(toks, " ")
 }
 
 // DeriveVariant extracts resolution and HBR signals from tags + title.

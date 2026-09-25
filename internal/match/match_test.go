@@ -15,6 +15,16 @@ func TestScoreMatchesVariantGroup(t *testing.T) {
 	}
 }
 
+// Resolution is not identity: a "4K" in the XBVR title must not demand
+// a "4k" in the group key, which no longer carries resolution signals.
+func TestScoreIgnoresResolution(t *testing.T) {
+	key := emp.GroupKey("[Virtual Papi] SfizyDyd (Next Door Peep) 2K")
+	w := xbvr.WantedScene{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep) 4K", Site: "Virtual Papi"}
+	if s := Score(key, w); s < 1 {
+		t.Errorf("score = %v, want 1 (resolution ignored both sides)", s)
+	}
+}
+
 func TestScoreRejectsUnrelated(t *testing.T) {
 	key := emp.GroupKey("VRCosplayX - The Legend of Vox Machina: Keyleth A XXX Parody - Gracey Snow (2026.09.17) (Oculus 8K)")
 	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"}
