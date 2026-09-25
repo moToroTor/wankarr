@@ -114,6 +114,7 @@ type Library struct {
 	toks    [][]string
 	sites   []string
 	heights []int
+	titles  []string
 }
 
 // IndexLibrary precomputes the comparison tokens of owned scenes.
@@ -129,21 +130,23 @@ func IndexLibrary(scenes []xbvr.OwnedScene) Library {
 		l.toks = append(l.toks, toks)
 		l.sites = append(l.sites, nonWord.ReplaceAllString(site, ""))
 		l.heights = append(l.heights, s.BestHeight)
+		l.titles = append(l.titles, s.Title)
 	}
 	return l
 }
 
-// Best returns the best local height among scenes scoring at least
-// threshold against the group key — the same arithmetic as ScoreTitle,
-// with the key tokenized once. Ties keep the first scene, mirroring
-// the inline loop it replaces.
-func (l Library) Best(groupKey string, threshold float64) (int, bool) {
+// Best returns the best local height and scene title among owned scenes
+// scoring at least threshold against the group key — the same arithmetic
+// as ScoreTitle, with the key tokenized once. Ties keep the first scene,
+// mirroring the inline loop it replaces. The title identifies the match
+// so In-library chips are verifiable, not just claims.
+func (l Library) Best(groupKey string, threshold float64) (height int, title string, ok bool) {
 	keySet := map[string]bool{}
 	for _, t := range normalize(groupKey) {
 		keySet[t] = true
 	}
 	compactKey := nonWord.ReplaceAllString(strings.ToLower(groupKey), "")
-	best, bestScore, ok := 0, 0.0, false
+	bestScore := 0.0
 	for i, toks := range l.toks {
 		hit := 0
 		for _, t := range toks {
@@ -162,10 +165,10 @@ func (l Library) Best(groupKey string, threshold float64) (int, bool) {
 			score = 1
 		}
 		if score >= threshold && score > bestScore {
-			best, bestScore, ok = l.heights[i], score, true
+			height, title, bestScore, ok = l.heights[i], l.titles[i], score, true
 		}
 	}
-	return best, ok
+	return height, title, ok
 }
 
 // AgainstWishlist scores every group against every wanted scene and

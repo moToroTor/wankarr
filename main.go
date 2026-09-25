@@ -247,7 +247,10 @@ type groupView struct {
 	WantedScore float64       `json:"wanted_score,omitempty"`
 	// OwnedHeight is the best local file height when the scene is
 	// already matched in the XBVR library (0 when not owned).
-	OwnedHeight int `json:"owned_height,omitempty"`
+	// OwnedTitle names the matched library scene so the chip is
+	// verifiable — a height alone can't be checked against XBVR.
+	OwnedHeight int    `json:"owned_height,omitempty"`
+	OwnedTitle  string `json:"owned_title,omitempty"`
 }
 
 // ownedCacheTTL bounds how stale the In-library chips can get. The
@@ -342,8 +345,8 @@ func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.Wa
 				wantCover = want.CoverURL
 			}
 		}
-		if h, ok := owned.Best(key, 0.6); ok {
-			g.OwnedHeight = h
+		if h, t, ok := owned.Best(key, 0.6); ok {
+			g.OwnedHeight, g.OwnedTitle = h, t
 		}
 		// Prefer XBVR's cover on matched groups (it is the canonical
 		// artwork for the scene); otherwise the newest Emp poster.

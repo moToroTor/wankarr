@@ -71,7 +71,7 @@ function groupCard(g) {
   const wanted = g.wanted_scene
     ? `<div class="wanted">Wanted: ${esc(g.wanted_scene)} (score ${Number(g.wanted_score).toFixed(2)})</div>` : '';
   const owned = g.owned_height
-    ? `<div class="owned">In library: ${esc(String(g.owned_height))}p</div>` : '';
+    ? `<div class="owned">In library: ${esc(String(g.owned_height))}p${g.owned_title ? ` — ${esc(g.owned_title)}` : ''}</div>` : '';
   const cover = g.cover
     ? `<img class="cover" src="${esc(g.cover)}" alt="" loading="lazy" onerror="this.remove()">` : '';
   // The group key is the scene identity minus variant parentheticals

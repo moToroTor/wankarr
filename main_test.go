@@ -37,11 +37,11 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	xc := xbvr.NewClient(srv.URL)
-	got, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
-	if !ok || got != 720 {
-		t.Fatalf("snapshot best = %d, %v; want 720, true", got, ok)
+	got, title, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
+	if !ok || got != 720 || title != "SfizyDyd" {
+		t.Fatalf("snapshot best = %d, %q, %v; want 720, SfizyDyd, true", got, title, ok)
 	}
-	again, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
+	again, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
 	if !ok || again != 720 {
 		t.Fatalf("cached best = %d, %v; want 720, true", again, ok)
 	}
@@ -50,7 +50,7 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}
 	ownedCache.at = time.Time{}
 	fail = true
-	if stale, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6); !ok || stale != 720 {
+	if stale, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6); !ok || stale != 720 {
 		t.Fatalf("stale best = %d, %v; want 720, true", stale, ok)
 	}
 	if calls != 2 {
@@ -78,9 +78,12 @@ func TestBuildGroupViewsMarksOwned(t *testing.T) {
 			if v.OwnedHeight != 720 {
 				t.Errorf("owned group height = %d, want 720", v.OwnedHeight)
 			}
+			if v.OwnedTitle != "SfizyDyd (Next Door Peep)" {
+				t.Errorf("owned group title = %q, want the matched library scene", v.OwnedTitle)
+			}
 		case "some other scene":
-			if v.OwnedHeight != 0 {
-				t.Errorf("unowned group height = %d, want 0", v.OwnedHeight)
+			if v.OwnedHeight != 0 || v.OwnedTitle != "" {
+				t.Errorf("unowned group = %d, %q; want 0, empty", v.OwnedHeight, v.OwnedTitle)
 			}
 		default:
 			t.Errorf("unexpected group key %q", v.Key)

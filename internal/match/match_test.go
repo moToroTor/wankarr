@@ -41,14 +41,14 @@ func TestLibraryBest(t *testing.T) {
 		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720},
 		{SceneID: "other", Title: "Completely Different Words Here", Site: "Other Site", BestHeight: 1080},
 	})
-	if h, ok := lib.Best("[virtual papi] sfizydyd (next door peep)", 0.6); !ok || h != 720 {
-		t.Errorf("best = %d, %v; want 720, true", h, ok)
+	if h, title, ok := lib.Best("[virtual papi] sfizydyd (next door peep)", 0.6); !ok || h != 720 || title != "SfizyDyd (Next Door Peep)" {
+		t.Errorf("best = %d, %q, %v; want 720, the scene title, true", h, title, ok)
 	}
-	if _, ok := lib.Best("some other scene entirely", 0.6); ok {
+	if _, _, ok := lib.Best("some other scene entirely", 0.6); ok {
 		t.Error("unrelated key matched, want false")
 	}
 	// Near-miss overlap below threshold: single shared token.
-	if _, ok := lib.Best("sfizydyd", 0.6); ok {
+	if _, _, ok := lib.Best("sfizydyd", 0.6); ok {
 		t.Error("below-threshold overlap matched, want false")
 	}
 }
