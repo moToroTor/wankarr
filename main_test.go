@@ -38,11 +38,11 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	xc := xbvr.NewClient(srv.URL)
-	got, title, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", 0.6)
+	got, title, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6)
 	if !ok || got != 720 || title != "SfizyDyd Scene" {
 		t.Fatalf("snapshot best = %d, %q, %v; want 720, SfizyDyd Scene, true", got, title, ok)
 	}
-	again, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", 0.6)
+	again, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6)
 	if !ok || again != 720 {
 		t.Fatalf("cached best = %d, %v; want 720, true", again, ok)
 	}
@@ -51,7 +51,7 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}
 	ownedCache.at = time.Time{}
 	fail = true
-	if stale, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", 0.6); !ok || stale != 720 {
+	if stale, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6); !ok || stale != 720 {
 		t.Fatalf("stale best = %d, %v; want 720, true", stale, ok)
 	}
 	if calls != 2 {
@@ -114,6 +114,26 @@ func TestPageViewsPaginatesAndSorts(t *testing.T) {
 	p0, _ := pageViews(views, 0, 10)
 	if len(p0) != 10 || p0[0].Title != "Scene 01" {
 		t.Fatalf("page 0 = %d views; want page 1", len(p0))
+	}
+}
+
+// A Jaccard-killed group is still marked owned when a variant is
+// byte-equal to an owned file of the fully-named scene.
+func TestBuildGroupViewsRescuesByteEqual(t *testing.T) {
+	const gb = int64(1) << 30
+	size := 35 * gb
+	items := []store.Item{
+		{GroupID: "a", Title: "[FuckPassVR] Star1, Star2 (Best Curvy Cowgirl Adventures Vol.1) [8K]", Tags: []string{"virtual.reality"}, SizeBytes: size},
+	}
+	owned := []xbvr.OwnedScene{
+		{SceneID: "fp-c", Title: "Best Curvy Cowgirl Adventures Vol.1", Site: "FuckPassVR", BestHeight: 1920, Sizes: []int64{size}},
+	}
+	views := buildGroupViews(emp.Profile{}, &config.Config{}, nil, match.IndexLibrary(owned), items, false)
+	if len(views) != 1 {
+		t.Fatalf("views = %d, want 1", len(views))
+	}
+	if views[0].OwnedHeight != 1920 || views[0].OwnedTitle != "Best Curvy Cowgirl Adventures Vol.1" {
+		t.Errorf("rescued group = %d, %q; want 1920, the compilation", views[0].OwnedHeight, views[0].OwnedTitle)
 	}
 }
 

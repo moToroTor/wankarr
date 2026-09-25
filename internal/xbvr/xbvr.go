@@ -38,6 +38,9 @@ type File struct {
 	VideoBitRate   int     `json:"video_bitrate"`
 	VideoCodecName string  `json:"video_codec_name"`
 	VideoDuration  float64 `json:"duration"`
+	// Size is the file's bytes on disk, for byte-equality matching
+	// against Emp upload sizes (0 when XBVR doesn't report it).
+	Size int64 `json:"size"`
 }
 
 // Actor mirrors the XBVR performer fields Wankarr needs.
@@ -97,6 +100,9 @@ type OwnedScene struct {
 	Title      string
 	Site       string
 	BestHeight int
+	// Sizes holds the byte sizes of the scene's matched files, for
+	// byte-equality rescue of title matches (sizeless files omitted).
+	Sizes []int64
 }
 
 // ListWishlist returns all wishlisted scenes, following pagination.
@@ -155,12 +161,16 @@ func (c *Client) ListOwned() ([]OwnedScene, error) {
 		}
 		for _, s := range resp.Scenes {
 			best := 0
+			var sizes []int64
 			for _, f := range s.Files {
 				if f.VideoHeight > best {
 					best = f.VideoHeight
 				}
+				if f.Size > 0 {
+					sizes = append(sizes, f.Size)
+				}
 			}
-			out = append(out, OwnedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, BestHeight: best})
+			out = append(out, OwnedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, BestHeight: best, Sizes: sizes})
 		}
 		if len(resp.Scenes) < page {
 			break

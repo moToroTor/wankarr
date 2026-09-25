@@ -128,11 +128,46 @@ func studioHitName(groupKey, site, studio string) bool {
 // scoring. Scoring every group against every owned title from scratch
 // on each view is O(groups × library) full tokenizations; the index
 // pays tokenization once per snapshot refresh and reuses it.
+// sizeTolerance bounds byte-equality: relative difference at or below
+// this means the Emp upload and the owned file are the same bytes.
+// Same-file sizes are exact; the margin absorbs feed rounding. A zero
+// on either side means unknown and never matches.
+const sizeTolerance = 0.02
+
+// sizeHit reports whether any variant size is byte-equal to any owned
+// size. Multi-file torrents are out of scope: totals are compared raw,
+// with no attempt to disambiguate batch contents.
+func sizeHit(variantSizes, ownedSizes []int64) bool {
+	for _, v := range variantSizes {
+		if v <= 0 {
+			continue
+		}
+		for _, o := range ownedSizes {
+			if o <= 0 {
+				continue
+			}
+			diff := v - o
+			if diff < 0 {
+				diff = -diff
+			}
+			bigger := v
+			if o > bigger {
+				bigger = o
+			}
+			if float64(diff)/float64(bigger) <= sizeTolerance {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type Library struct {
 	toks    [][]string
 	sites   []string
 	heights []int
 	titles  []string
+	sizes   [][]int64
 }
 
 // IndexLibrary precomputes the comparison tokens of owned scenes.
@@ -150,6 +185,7 @@ func IndexLibrary(scenes []xbvr.OwnedScene) Library {
 		l.sites = append(l.sites, nonWord.ReplaceAllString(site, ""))
 		l.heights = append(l.heights, s.BestHeight)
 		l.titles = append(l.titles, s.Title)
+		l.sizes = append(l.sizes, s.Sizes)
 	}
 	return l
 }
@@ -159,13 +195,23 @@ func IndexLibrary(scenes []xbvr.OwnedScene) Library {
 // as ScoreTitle, with the key tokenized once. Ties keep the first scene,
 // mirroring the inline loop it replaces. The title identifies the match
 // so In-library chips are verifiable, not just claims.
-func (l Library) Best(groupKey string, threshold float64) (height int, title string, ok bool) {
+//
+// variantSizes are the group's upload content sizes. When no title-scored
+// match exists, a scene is rescued if every one of its significant tokens
+// is in the key (perfect recall) and a variant is byte-equal to an owned
+// file: same name plus same bytes is near-certain even when Jaccard is low
+// (e.g. performer-heavy compilation keys). Rescue fills gaps only — it
+// never overrides a title-scored match.
+func (l Library) Best(groupKey string, variantSizes []int64, threshold float64) (height int, title string, ok bool) {
 	keySet := map[string]bool{}
 	for _, t := range normalize(groupKey) {
 		keySet[t] = true
 	}
 	compactKey := nonWord.ReplaceAllString(strings.ToLower(groupKey), "")
 	bestScore := 0.0
+	var rescueHeight int
+	var rescueTitle string
+	rescued := false
 	for i, toks := range l.toks {
 		hit := 0
 		for _, t := range toks {
@@ -174,6 +220,12 @@ func (l Library) Best(groupKey string, threshold float64) (height int, title str
 			}
 		}
 		if hit == 0 {
+			continue
+		}
+		if hit == len(toks) && sizeHit(variantSizes, l.sizes[i]) {
+			if !rescued {
+				rescueHeight, rescueTitle, rescued = l.heights[i], l.titles[i], true
+			}
 			continue
 		}
 		if float64(hit)/float64(len(toks)+len(keySet)-hit) < minJaccard {
@@ -189,6 +241,9 @@ func (l Library) Best(groupKey string, threshold float64) (height int, title str
 		if score >= threshold && score > bestScore {
 			height, title, bestScore, ok = l.heights[i], l.titles[i], score, true
 		}
+	}
+	if !ok && rescued {
+		return rescueHeight, rescueTitle, true
 	}
 	return height, title, ok
 }

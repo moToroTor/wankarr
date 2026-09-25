@@ -26,7 +26,10 @@ func stubServer(t *testing.T) (*Client, *[]map[string]any) {
 			scenes = []Scene{{
 				SceneID: "fuckpassvr-001", Title: "Rainy City Rendezvous",
 				Site: "FuckPassVR", Wishlist: true,
-				Files: []File{{VideoWidth: 3840, VideoHeight: 1920}},
+				Files: []File{
+					{VideoWidth: 3840, VideoHeight: 1920, Size: 35 << 30},
+					{VideoWidth: 1920, VideoHeight: 960},
+				},
 			}}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"scenes": scenes, "results": len(scenes)})
@@ -57,6 +60,19 @@ func TestListOwnedPicksBestHeight(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].BestHeight != 1920 {
 		t.Fatalf("owned = %+v", got)
+	}
+}
+
+// ListOwned collects matched file sizes for byte-equality matching;
+// sizeless files are omitted, not zero-filled.
+func TestListOwnedCollectsSizes(t *testing.T) {
+	c, _ := stubServer(t)
+	got, err := c.ListOwned()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || len(got[0].Sizes) != 1 || got[0].Sizes[0] != 35<<30 {
+		t.Fatalf("owned sizes = %+v", got)
 	}
 }
 

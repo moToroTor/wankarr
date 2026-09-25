@@ -390,7 +390,13 @@ func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.Wa
 				wantCover = want.CoverURL
 			}
 		}
-		if h, t, ok := owned.Best(key, 0.6); ok {
+		var variantSizes []int64
+		for _, v := range vs {
+			if v.Item.SizeBytes > 0 {
+				variantSizes = append(variantSizes, v.Item.SizeBytes)
+			}
+		}
+		if h, t, ok := owned.Best(key, variantSizes, 0.6); ok {
 			g.OwnedHeight, g.OwnedTitle = h, t
 		}
 		// Prefer XBVR's cover on matched groups (it is the canonical
