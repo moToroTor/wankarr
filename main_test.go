@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -30,18 +31,18 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"scenes": []map[string]any{{
-				"id": 3, "scene_id": "vp-1", "title": "SfizyDyd", "site": "Virtual Papi",
+				"id": 3, "scene_id": "vp-1", "title": "SfizyDyd Scene", "site": "Virtual Papi",
 				"file": []map[string]any{{"video_height": 720}},
 			}},
 		})
 	}))
 	t.Cleanup(srv.Close)
 	xc := xbvr.NewClient(srv.URL)
-	got, title, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
-	if !ok || got != 720 || title != "SfizyDyd" {
-		t.Fatalf("snapshot best = %d, %q, %v; want 720, SfizyDyd, true", got, title, ok)
+	got, title, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", 0.6)
+	if !ok || got != 720 || title != "SfizyDyd Scene" {
+		t.Fatalf("snapshot best = %d, %q, %v; want 720, SfizyDyd Scene, true", got, title, ok)
 	}
-	again, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
+	again, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", 0.6)
 	if !ok || again != 720 {
 		t.Fatalf("cached best = %d, %v; want 720, true", again, ok)
 	}
@@ -50,7 +51,7 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}
 	ownedCache.at = time.Time{}
 	fail = true
-	if stale, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6); !ok || stale != 720 {
+	if stale, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", 0.6); !ok || stale != 720 {
 		t.Fatalf("stale best = %d, %v; want 720, true", stale, ok)
 	}
 	if calls != 2 {
@@ -88,6 +89,31 @@ func TestBuildGroupViewsMarksOwned(t *testing.T) {
 		default:
 			t.Errorf("unexpected group key %q", v.Key)
 		}
+	}
+}
+
+// Pages are sorted by title (map order is random), 10 per page by
+// default, with out-of-range pages returning empty instead of erroring.
+func TestPageViewsPaginatesAndSorts(t *testing.T) {
+	var views []groupView
+	for i := 25; i >= 1; i-- {
+		views = append(views, groupView{Key: fmt.Sprintf("k%02d", i), Title: fmt.Sprintf("Scene %02d", i)})
+	}
+	p1, total := pageViews(views, 1, 10)
+	if total != 25 || len(p1) != 10 || p1[0].Title != "Scene 01" || p1[9].Title != "Scene 10" {
+		t.Fatalf("page 1 = %d views of %d, first %q; want 10 of 25 from Scene 01", len(p1), total, p1[0].Title)
+	}
+	p3, _ := pageViews(views, 3, 10)
+	if len(p3) != 5 || p3[0].Title != "Scene 21" {
+		t.Fatalf("page 3 = %d views; want 5 from Scene 21", len(p3))
+	}
+	p9, total := pageViews(views, 9, 10)
+	if len(p9) != 0 || total != 25 {
+		t.Fatalf("page 9 = %d views of %d; want 0 of 25", len(p9), total)
+	}
+	p0, _ := pageViews(views, 0, 10)
+	if len(p0) != 10 || p0[0].Title != "Scene 01" {
+		t.Fatalf("page 0 = %d views; want page 1", len(p0))
 	}
 }
 

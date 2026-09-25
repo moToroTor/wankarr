@@ -53,6 +53,22 @@ func TestLibraryBest(t *testing.T) {
 	}
 }
 
+// Reported false positive: a one-word library title ("Slut") scored
+// 1.0 against every group containing that word. Single-token titles
+// carry no identifying power and must never claim a match.
+func TestSingleTokenTitleNeverMatches(t *testing.T) {
+	lib := IndexLibrary([]xbvr.OwnedScene{
+		{SceneID: "x-1", Title: "Slut", Site: "Virtual Papi", BestHeight: 2880},
+	})
+	if _, _, ok := lib.Best("[virtual papi] maya rose (french little slut)", 0.6); ok {
+		t.Error("single-token owned title matched, want false")
+	}
+	w := xbvr.WantedScene{SceneID: "x-1", Title: "Slut", Site: "Virtual Papi"}
+	if s := Score("[virtual papi] maya rose (french little slut)", w); s != 0 {
+		t.Errorf("single-token wanted title scored %v, want 0", s)
+	}
+}
+
 func TestScoreRejectsUnrelated(t *testing.T) {
 	key := emp.GroupKey("VRCosplayX - The Legend of Vox Machina: Keyleth A XXX Parody - Gracey Snow (2026.09.17) (Oculus 8K)")
 	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"}

@@ -87,6 +87,7 @@ function groupCard(g) {
 }
 
 let activeQuery = '';
+let activePage = 1;
 
 async function showGroups() {
   setStatus('Loading groups…');
@@ -94,20 +95,30 @@ async function showGroups() {
     const params = new URLSearchParams();
     if (!$('#vr-only').checked) params.set('vr', '0');
     if (activeQuery) params.set('q', activeQuery);
-    const qs = params.toString();
-    const groups = await fetchJSON(`/api/groups${qs ? `?${qs}` : ''}`);
+    params.set('page', String(activePage));
+    const res = await fetchJSON(`/api/groups?${params.toString()}`);
+    activePage = res.page;
+    const pages = Math.max(1, Math.ceil(res.total / res.per_page));
     const filterNote = activeQuery
       ? `<p>Filtered to “${esc(activeQuery)}” <button id="clear-q">show all</button></p>` : '';
-    $('#groups-view').innerHTML = filterNote + (groups.length
-      ? groups.map(groupCard).join('')
-      : '<p>No matching groups. Poll an RSS feed or run a search.</p>');
+    const pager = pages > 1
+      ? `<p><button id="prev-p"${res.page <= 1 ? ' disabled' : ''}>← Prev</button> Page ${res.page} of ${pages} · ${res.total} groups <button id="next-p"${res.page >= pages ? ' disabled' : ''}>Next →</button></p>`
+      : '';
+    $('#groups-view').innerHTML = filterNote + (res.groups.length
+      ? res.groups.map(groupCard).join('')
+      : '<p>No matching groups. Poll an RSS feed or run a search.</p>') + pager;
     const clear = $('#clear-q');
     if (clear) clear.addEventListener('click', () => {
       activeQuery = '';
+      activePage = 1;
       $('#search-q').value = '';
       showGroups();
     });
-    setStatus(`${groups.length} scene group(s) shown.`);
+    const prev = $('#prev-p');
+    if (prev) prev.addEventListener('click', () => { activePage--; showGroups(); });
+    const next = $('#next-p');
+    if (next) next.addEventListener('click', () => { activePage++; showGroups(); });
+    setStatus(`Page ${res.page} of ${pages} · ${res.total} scene group(s).`);
   } catch (e) { setStatus(`Error: ${e.message}`); }
 }
 
@@ -169,6 +180,7 @@ async function searchTitle(query, title, btn) {
     const r = await fetchJSON(`/api/search?q=${encodeURIComponent(query)}`);
     setStatus(`Search complete: ${r.results} result(s), ${r.new} new.`);
     activeQuery = query;
+    activePage = 1;
     $('#search-q').value = query;
     switchView('groups');
   } catch (e) {
@@ -180,7 +192,7 @@ async function searchTitle(query, title, btn) {
 document.querySelectorAll('nav button').forEach((b) =>
   b.addEventListener('click', () => switchView(b.dataset.view)));
 
-$('#vr-only').addEventListener('change', () => switchView('groups'));
+$('#vr-only').addEventListener('change', () => { activePage = 1; switchView('groups'); });
 
 $('#rematch').addEventListener('click', async () => {
   setStatus('Re-matching index against wishlist…');

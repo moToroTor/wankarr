@@ -33,6 +33,11 @@ var stopwords = map[string]bool{
 	"and": true, "vr": true, "3d": true, "180": true, "360": true,
 }
 
+// minTitleTokens is the minimum significant tokens a title needs to
+// claim a match. A single token ("Slut") scores 1.0 against every group
+// containing that word — zero identifying power, pure false positives.
+const minTitleTokens = 2
+
 // Score rates an Emp group key against a wanted scene. All significant
 // tokens of the XBVR title must appear in the group key for a nonzero
 // score; a studio/site token match adds a bonus.
@@ -45,7 +50,7 @@ func Score(groupKey string, w xbvr.WantedScene) float64 {
 // wishlist entries.
 func ScoreTitle(groupKey, title, site, studio string) float64 {
 	titleToks := significant(normalize(title))
-	if len(titleToks) == 0 {
+	if len(titleToks) < minTitleTokens {
 		return 0
 	}
 	keySet := map[string]bool{}
@@ -118,12 +123,13 @@ type Library struct {
 }
 
 // IndexLibrary precomputes the comparison tokens of owned scenes.
-// Titles with no significant tokens are dropped (they can never hit).
+// Titles below minTitleTokens are dropped (they can never hit, and a
+// single token would false-positive on every group containing it).
 func IndexLibrary(scenes []xbvr.OwnedScene) Library {
 	var l Library
 	for _, s := range scenes {
 		toks := significant(normalize(s.Title))
-		if len(toks) == 0 {
+		if len(toks) < minTitleTokens {
 			continue
 		}
 		site := strings.ToLower(strings.TrimSpace(s.Site))

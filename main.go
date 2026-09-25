@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -304,7 +306,50 @@ func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Respo
 	vrOnly := r.URL.Query().Get("vr") != "0"
 	q := r.URL.Query().Get("q")
 	items = filterQuery(items, q)
-	writeJSON(w, buildGroupViews(emp.Profile{}, cfg, wishlist, owned, items, vrOnly))
+	page := 1
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 1 {
+		page = p
+	}
+	views, total := pageViews(buildGroupViews(emp.Profile{}, cfg, wishlist, owned, items, vrOnly), page, groupsPerPage)
+	writeJSON(w, groupsPage{Groups: views, Total: total, Page: page, PerPage: groupsPerPage})
+}
+
+// groupsPerPage bounds one Groups view: 60+ cards with covers and
+// variant tables render slowly on weak clients, and nobody compares
+// that many scenes at once.
+const groupsPerPage = 10
+
+type groupsPage struct {
+	Groups  []groupView `json:"groups"`
+	Total   int         `json:"total"`
+	Page    int         `json:"page"`
+	PerPage int         `json:"per_page"`
+}
+
+// pageViews sorts views deterministically (Go map order is random, and
+// pagination needs stability) and returns one 1-based page plus the
+// total. Out-of-range pages return an empty page, never an error.
+func pageViews(views []groupView, page, perPage int) ([]groupView, int) {
+	total := len(views)
+	sort.SliceStable(views, func(i, j int) bool {
+		ti, tj := strings.ToLower(views[i].Title), strings.ToLower(views[j].Title)
+		if ti != tj {
+			return ti < tj
+		}
+		return views[i].Key < views[j].Key
+	})
+	if page < 1 {
+		page = 1
+	}
+	start := (page - 1) * perPage
+	if start >= total {
+		return []groupView{}, total
+	}
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	return views[start:end], total
 }
 
 // buildGroupViews clusters items into enriched scene groups. Wishlist
