@@ -258,27 +258,27 @@ const ownedCacheTTL = 5 * time.Minute
 
 var ownedCache struct {
 	sync.Mutex
-	at   time.Time
-	list []xbvr.OwnedScene
+	at  time.Time
+	lib match.Library
 }
 
-// getOwned returns the cached XBVR library snapshot, refreshing it past
-// ownedCacheTTL. A failed refresh keeps serving the stale snapshot:
-// XBVR blips must neither strip every In-library chip nor stall the
-// page on a full re-page retry.
-func getOwned(xc *xbvr.Client) []xbvr.OwnedScene {
+// getOwned returns the cached XBVR library index, refreshing it past
+// ownedCacheTTL. A failed refresh keeps serving the stale index: XBVR
+// blips must neither strip every In-library chip nor stall the page
+// on a full re-page retry.
+func getOwned(xc *xbvr.Client) match.Library {
 	ownedCache.Lock()
 	defer ownedCache.Unlock()
 	if time.Since(ownedCache.at) < ownedCacheTTL {
-		return ownedCache.list
+		return ownedCache.lib
 	}
 	list, err := xc.ListOwned()
 	if err != nil {
 		log.Printf("library snapshot unavailable: %v", err)
-		return ownedCache.list
+		return ownedCache.lib
 	}
-	ownedCache.at, ownedCache.list = time.Now(), list
-	return list
+	ownedCache.at, ownedCache.lib = time.Now(), match.IndexLibrary(list)
+	return ownedCache.lib
 }
 
 func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.ResponseWriter, r *http.Request) {
@@ -307,7 +307,7 @@ func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Respo
 // buildGroupViews clusters items into enriched scene groups. Wishlist
 // pairing drives the wanted flag and cover preference; library pairing
 // marks groups already matched in XBVR so owned scenes are recognizable.
-func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.WantedScene, owned []xbvr.OwnedScene, items []store.Item, vrOnly bool) []groupView {
+func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.WantedScene, owned match.Library, items []store.Item, vrOnly bool) []groupView {
 	out := []groupView{}
 	for key, vs := range emp.Group(items) {
 		if vrOnly && !anyVR(vs) {
@@ -342,11 +342,8 @@ func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.Wa
 				wantCover = want.CoverURL
 			}
 		}
-		var ownedScore float64
-		for _, o := range owned {
-			if s := match.ScoreTitle(key, o.Title, o.Site, ""); s >= 0.6 && s > ownedScore {
-				ownedScore, g.OwnedHeight = s, o.BestHeight
-			}
+		if h, ok := owned.Best(key, 0.6); ok {
+			g.OwnedHeight = h
 		}
 		// Prefer XBVR's cover on matched groups (it is the canonical
 		// artwork for the scene); otherwise the newest Emp poster.

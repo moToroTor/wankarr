@@ -11,6 +11,7 @@ import (
 
 	"wankarr/internal/config"
 	"wankarr/internal/emp"
+	"wankarr/internal/match"
 	"wankarr/internal/store"
 	"wankarr/internal/xbvr"
 )
@@ -18,7 +19,7 @@ import (
 // The library snapshot is cached: the second view in a row makes no
 // new XBVR request, and a failed refresh past TTL keeps the stale list.
 func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
-	ownedCache.at, ownedCache.list = time.Time{}, nil
+	ownedCache.at, ownedCache.lib = time.Time{}, match.Library{}
 	var calls int
 	fail := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,20 +37,21 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	xc := xbvr.NewClient(srv.URL)
-	got := getOwned(xc)
-	if len(got) != 1 || got[0].BestHeight != 720 {
-		t.Fatalf("snapshot = %+v, want one 720p scene", got)
+	got, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
+	if !ok || got != 720 {
+		t.Fatalf("snapshot best = %d, %v; want 720, true", got, ok)
 	}
-	if again := getOwned(xc); len(again) != 1 {
-		t.Fatalf("cached = %+v, want 1", again)
+	again, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6)
+	if !ok || again != 720 {
+		t.Fatalf("cached best = %d, %v; want 720, true", again, ok)
 	}
 	if calls != 1 {
 		t.Fatalf("xbvr calls = %d, want 1 (second served from cache)", calls)
 	}
 	ownedCache.at = time.Time{}
 	fail = true
-	if stale := getOwned(xc); len(stale) != 1 {
-		t.Fatalf("stale = %+v, want the cached scene", stale)
+	if stale, ok := getOwned(xc).Best("[virtual papi] sfizydyd", 0.6); !ok || stale != 720 {
+		t.Fatalf("stale best = %d, %v; want 720, true", stale, ok)
 	}
 	if calls != 2 {
 		t.Fatalf("xbvr calls = %d, want 2 (one retry, then stale)", calls)
@@ -66,7 +68,7 @@ func TestBuildGroupViewsMarksOwned(t *testing.T) {
 	owned := []xbvr.OwnedScene{
 		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720},
 	}
-	views := buildGroupViews(emp.Profile{}, &config.Config{}, nil, owned, items, false)
+	views := buildGroupViews(emp.Profile{}, &config.Config{}, nil, match.IndexLibrary(owned), items, false)
 	if len(views) != 2 {
 		t.Fatalf("views = %d, want 2", len(views))
 	}

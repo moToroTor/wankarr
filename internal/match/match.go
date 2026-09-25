@@ -106,6 +106,68 @@ func studioHitName(groupKey, site, studio string) bool {
 	return false
 }
 
+// Library is a precomputed snapshot of owned scenes for repeated group
+// scoring. Scoring every group against every owned title from scratch
+// on each view is O(groups × library) full tokenizations; the index
+// pays tokenization once per snapshot refresh and reuses it.
+type Library struct {
+	toks    [][]string
+	sites   []string
+	heights []int
+}
+
+// IndexLibrary precomputes the comparison tokens of owned scenes.
+// Titles with no significant tokens are dropped (they can never hit).
+func IndexLibrary(scenes []xbvr.OwnedScene) Library {
+	var l Library
+	for _, s := range scenes {
+		toks := significant(normalize(s.Title))
+		if len(toks) == 0 {
+			continue
+		}
+		site := strings.ToLower(strings.TrimSpace(s.Site))
+		l.toks = append(l.toks, toks)
+		l.sites = append(l.sites, nonWord.ReplaceAllString(site, ""))
+		l.heights = append(l.heights, s.BestHeight)
+	}
+	return l
+}
+
+// Best returns the best local height among scenes scoring at least
+// threshold against the group key — the same arithmetic as ScoreTitle,
+// with the key tokenized once. Ties keep the first scene, mirroring
+// the inline loop it replaces.
+func (l Library) Best(groupKey string, threshold float64) (int, bool) {
+	keySet := map[string]bool{}
+	for _, t := range normalize(groupKey) {
+		keySet[t] = true
+	}
+	compactKey := nonWord.ReplaceAllString(strings.ToLower(groupKey), "")
+	best, bestScore, ok := 0, 0.0, false
+	for i, toks := range l.toks {
+		hit := 0
+		for _, t := range toks {
+			if keySet[t] {
+				hit++
+			}
+		}
+		if hit == 0 {
+			continue
+		}
+		score := float64(hit) / float64(len(toks))
+		if c := l.sites[i]; c != "" && strings.Contains(compactKey, c) {
+			score += 0.2
+		}
+		if score > 1 {
+			score = 1
+		}
+		if score >= threshold && score > bestScore {
+			best, bestScore, ok = l.heights[i], score, true
+		}
+	}
+	return best, ok
+}
+
 // AgainstWishlist scores every group against every wanted scene and
 // returns matches at or above threshold.
 func AgainstWishlist(groups map[string][]emp.Variant, wishlist []xbvr.WantedScene, threshold float64) []Result {

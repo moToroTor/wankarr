@@ -34,6 +34,25 @@ func TestScoreTitleMatchesScore(t *testing.T) {
 	}
 }
 
+// Best answers from the index: the matching scene's height, nothing
+// for unrelated keys or below-threshold overlaps.
+func TestLibraryBest(t *testing.T) {
+	lib := IndexLibrary([]xbvr.OwnedScene{
+		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720},
+		{SceneID: "other", Title: "Completely Different Words Here", Site: "Other Site", BestHeight: 1080},
+	})
+	if h, ok := lib.Best("[virtual papi] sfizydyd (next door peep)", 0.6); !ok || h != 720 {
+		t.Errorf("best = %d, %v; want 720, true", h, ok)
+	}
+	if _, ok := lib.Best("some other scene entirely", 0.6); ok {
+		t.Error("unrelated key matched, want false")
+	}
+	// Near-miss overlap below threshold: single shared token.
+	if _, ok := lib.Best("sfizydyd", 0.6); ok {
+		t.Error("below-threshold overlap matched, want false")
+	}
+}
+
 func TestScoreRejectsUnrelated(t *testing.T) {
 	key := emp.GroupKey("VRCosplayX - The Legend of Vox Machina: Keyleth A XXX Parody - Gracey Snow (2026.09.17) (Oculus 8K)")
 	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"}
