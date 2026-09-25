@@ -103,6 +103,17 @@ Center → Settings → Package Sources). Each tagged release rebuilds the
 
 `https://moToroTor.github.io/wankarr/api/package`
 
+**Command-line upgrades:** Package Center has no catalog refresh button,
+so for the newest build without waiting on the UI, run
+[`update.sh`](update.sh) over SSH — it picks the newest `.spk` for your
+arch from the catalog and installs it with `synopkg` (the same in-place
+upgrade Package Center performs, data preserved):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/moToroTor/wankarr/main/update.sh -o /tmp/update.sh
+sudo sh /tmp/update.sh          # or: sh /tmp/update.sh --check
+```
+
 **NAS `.env` notes:** Transmission and Jackett are local, so
 `TRANSMISSION_URL=http://127.0.0.1:9091/transmission/rpc` and
 `JACKETT_URL=http://127.0.0.1:9117`; `XBVR_URL` stays whatever it is on
