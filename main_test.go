@@ -239,7 +239,9 @@ func TestServeSendSeedsFilenames(t *testing.T) {
 		})
 	}))
 	t.Cleanup(trans.Close)
-	var editBody map[string]any
+	var appendBody struct {
+		Filenames []string `json:"filenames"`
+	}
 	xbvrSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/scene/list":
@@ -250,16 +252,11 @@ func TestServeSendSeedsFilenames(t *testing.T) {
 					"site": "FuckPassVR", "filenames_arr": `["old.mp4"]`,
 				}},
 			})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/scene/9":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": 9, "title": "Rainy City Rendezvous", "site": "FuckPassVR",
-				"filenames_arr": `["old.mp4"]`,
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/scene/edit/9":
-			if err := json.NewDecoder(r.Body).Decode(&editBody); err != nil {
-				t.Errorf("decode edit: %v", err)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/scene/filenames/9":
+			if err := json.NewDecoder(r.Body).Decode(&appendBody); err != nil {
+				t.Errorf("decode append: %v", err)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9})
+			_ = json.NewEncoder(w).Encode([]string{"old.mp4", "rainy_city_8k.mp4"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -281,15 +278,8 @@ func TestServeSendSeedsFilenames(t *testing.T) {
 	if got["seeded_filenames"] != float64(1) {
 		t.Errorf("seeded_filenames = %v, want 1", got["seeded_filenames"])
 	}
-	var arr []string
-	if err := json.Unmarshal([]byte(editBody["filenames_arr"].(string)), &arr); err != nil {
-		t.Fatalf("filenames_arr: %v", err)
-	}
-	if len(arr) != 2 || arr[0] != "old.mp4" || arr[1] != "rainy_city_8k.mp4" {
-		t.Errorf("filenames_arr = %q, want old + new inner name", arr)
-	}
-	if editBody["title"] != "Rainy City Rendezvous" {
-		t.Errorf("edit dropped title: %v", editBody)
+	if len(appendBody.Filenames) != 1 || appendBody.Filenames[0] != "rainy_city_8k.mp4" {
+		t.Errorf("appended filenames = %q, want just the fresh inner name", appendBody.Filenames)
 	}
 }
 

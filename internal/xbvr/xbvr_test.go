@@ -60,82 +60,91 @@ func TestListOwnedPicksBestHeight(t *testing.T) {
 	}
 }
 
-// seedStub serves scene detail plus a capturing edit endpoint.
-func seedStub(t *testing.T, scene map[string]any) (*Client, *int, *map[string]any) {
+// appendStub serves the additive filenames endpoint over a stored list,
+// merging posted names the way XBVR does. appendStatus forces the
+// endpoint's status (0 means 200 with the merged list).
+func appendStub(t *testing.T, stored []string, appendStatus int) (*Client, *[]string, *int) {
 	t.Helper()
-	var edits int
-	var last map[string]any
+	var got []string
+	var posts int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/scene/9":
-			_ = json.NewEncoder(w).Encode(scene)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/scene/edit/9":
-			edits++
-			if err := json.NewDecoder(r.Body).Decode(&last); err != nil {
-				t.Errorf("decode edit: %v", err)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9})
-		default:
+		if r.Method != http.MethodPost || r.URL.Path != "/api/scene/filenames/9" {
 			http.NotFound(w, r)
+			return
 		}
+		posts++
+		var req struct {
+			Filenames []string `json:"filenames"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode append: %v", err)
+		}
+		got = req.Filenames
+		if appendStatus != 0 {
+			http.Error(w, "forced", appendStatus)
+			return
+		}
+		have := map[string]bool{}
+		for _, s := range stored {
+			have[s] = true
+		}
+		for _, n := range req.Filenames {
+			if !have[n] {
+				stored = append(stored, n)
+				have[n] = true
+			}
+		}
+		_ = json.NewEncoder(w).Encode(stored)
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(srv.URL), &edits, &last
+	return NewClient(srv.URL), &got, &posts
 }
 
-// SeedFilenames merges missing names into the scene's known-filenames
-// and posts the full object back (partial posts would wipe XBVR fields).
-func TestSeedFilenamesMerges(t *testing.T) {
-	c, edits, last := seedStub(t, map[string]any{
-		"id": 9, "title": "Rainy City Rendezvous", "site": "FuckPassVR",
-		"filenames_arr": `["old.mp4"]`,
-	})
+// SeedFilenames posts names verbatim to the append endpoint; the server
+// merges and returns the list.
+func TestSeedFilenamesAppends(t *testing.T) {
+	c, got, posts := appendStub(t, []string{"old.mp4"}, 0)
 	added, err := c.SeedFilenames(9, []string{"old.mp4", "new_4k.mp4"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if added != 1 {
-		t.Errorf("added = %d, want 1", added)
+	if added != 2 {
+		t.Errorf("added = %d, want 2 (names sent)", added)
 	}
-	if *edits != 1 {
-		t.Fatalf("edits = %d, want 1", *edits)
+	if *posts != 1 {
+		t.Fatalf("posts = %d, want 1", *posts)
 	}
-	var arr []string
-	if err := json.Unmarshal([]byte((*last)["filenames_arr"].(string)), &arr); err != nil {
-		t.Fatalf("filenames_arr: %v", err)
-	}
-	if len(arr) != 2 || arr[0] != "old.mp4" || arr[1] != "new_4k.mp4" {
-		t.Errorf("filenames_arr = %q, want old+new", arr)
-	}
-	if (*last)["title"] != "Rainy City Rendezvous" || (*last)["site"] != "FuckPassVR" {
-		t.Errorf("edit dropped scene fields: %v", *last)
+	if len(*got) != 2 || (*got)[0] != "old.mp4" || (*got)[1] != "new_4k.mp4" {
+		t.Errorf("posted filenames = %q, want verbatim names", *got)
 	}
 }
 
-// Nothing new to register means no edit call at all.
-func TestSeedFilenamesNoopWhenKnown(t *testing.T) {
-	c, edits, _ := seedStub(t, map[string]any{
-		"id": 9, "filenames_arr": `["a.mp4"]`,
-	})
-	added, err := c.SeedFilenames(9, []string{"a.mp4"})
-	if err != nil {
-		t.Fatal(err)
+// Empty input or an unknown scene id means no request at all.
+func TestSeedFilenamesSkipsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL)
+	if n, err := c.SeedFilenames(0, []string{"a.mp4"}); n != 0 || err != nil {
+		t.Errorf("dbid 0: added = %d, err = %v; want 0, nil", n, err)
 	}
-	if added != 0 || *edits != 0 {
-		t.Errorf("added = %d, edits = %d; want no edit", added, *edits)
+	if n, err := c.SeedFilenames(9, nil); n != 0 || err != nil {
+		t.Errorf("no names: added = %d, err = %v; want 0, nil", n, err)
 	}
 }
 
-// A corrupt stored list is refused, never clobbered.
-func TestSeedFilenamesRefusesCorrupt(t *testing.T) {
-	c, edits, _ := seedStub(t, map[string]any{
-		"id": 9, "filenames_arr": `["broken`,
-	})
-	if _, err := c.SeedFilenames(9, []string{"new.mp4"}); err == nil {
-		t.Error("expected error on corrupt filenames_arr, got nil")
-	}
-	if *edits != 0 {
-		t.Errorf("edits = %d, want 0", *edits)
+// Any non-200 append status (unknown scene, corrupt stored list, missing
+// endpoint) surfaces as an error.
+func TestSeedFilenamesSurfacesError(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
+		c, _, posts := appendStub(t, nil, status)
+		if _, err := c.SeedFilenames(9, []string{"new.mp4"}); err == nil {
+			t.Errorf("status %d: expected error, got nil", status)
+		}
+		if *posts != 1 {
+			t.Errorf("status %d: posts = %d, want 1", status, *posts)
+		}
 	}
 }
 

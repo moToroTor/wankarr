@@ -26,9 +26,9 @@ type wizardStep struct {
 	Items     []struct {
 		Type     string `json:"type"`
 		SubItems []struct {
-			Key          string `json:"key"`
-			Desc         string `json:"desc"`
-			DefaultValue string `json:"defaultValue"`
+			Key          string         `json:"key"`
+			Desc         string         `json:"desc"`
+			DefaultValue string         `json:"defaultValue"`
 			Validator    map[string]any `json:"validator"`
 		} `json:"subitems"`
 	} `json:"items"`
@@ -146,15 +146,15 @@ func TestUpgradeWizardPrefill(t *testing.T) {
 	defaults := assertWizardShape(t, steps)
 
 	want := map[string]string{
-		"wizard_xbvr_url":         "http://xbvr:9999",
-		"wizard_rss_feeds":        "https://tracker/feed?auth=abc,https://other/feed?auth=def",
-		"wizard_jackett_url":      "http://nas:9117",
-		"wizard_jackett_api_key":  tricky,
-		"wizard_torznab_paths":    "/api/v2.0/indexers/empornium/results/torznab/",
-		"wizard_transmission_url": "http://nas:9091/transmission/rpc",
+		"wizard_xbvr_url":          "http://xbvr:9999",
+		"wizard_rss_feeds":         "https://tracker/feed?auth=abc,https://other/feed?auth=def",
+		"wizard_jackett_url":       "http://nas:9117",
+		"wizard_jackett_api_key":   tricky,
+		"wizard_torznab_paths":     "/api/v2.0/indexers/empornium/results/torznab/",
+		"wizard_transmission_url":  "http://nas:9091/transmission/rpc",
 		"wizard_transmission_user": "tom",
 		"wizard_transmission_pass": tricky,
-		"wizard_transmission_dir": "/mnt/media/vr",
+		"wizard_transmission_dir":  "/mnt/media/vr",
 	}
 	for k, v := range want {
 		if defaults[k] != v {
@@ -220,15 +220,15 @@ func TestServicePostinstWritesEnv(t *testing.T) {
 
 	tricky := "p@ss #with 'quotes'"
 	wizard := map[string]string{
-		"wizard_xbvr_url":         "http://xbvr:9999",
-		"wizard_rss_feeds":        "https://tracker/feed?auth=abc,https://other/feed?auth=def",
-		"wizard_jackett_url":      "http://nas:9117",
-		"wizard_jackett_api_key":  tricky,
-		"wizard_torznab_paths":    "/api/v2.0/indexers/empornium/results/torznab/",
-		"wizard_transmission_url": "http://nas:9091/transmission/rpc",
+		"wizard_xbvr_url":          "http://xbvr:9999",
+		"wizard_rss_feeds":         "https://tracker/feed?auth=abc,https://other/feed?auth=def",
+		"wizard_jackett_url":       "http://nas:9117",
+		"wizard_jackett_api_key":   tricky,
+		"wizard_torznab_paths":     "/api/v2.0/indexers/empornium/results/torznab/",
+		"wizard_transmission_url":  "http://nas:9091/transmission/rpc",
 		"wizard_transmission_user": "tom",
 		"wizard_transmission_pass": tricky,
-		"wizard_transmission_dir": "",
+		"wizard_transmission_dir":  "",
 	}
 	if err := runPostinst(wizard); err != nil {
 		t.Fatalf("postinst failed: %v", err)
