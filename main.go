@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"wankarr/internal/config"
@@ -249,6 +250,37 @@ type groupView struct {
 	OwnedHeight int `json:"owned_height,omitempty"`
 }
 
+// ownedCacheTTL bounds how stale the In-library chips can get. The
+// library only changes on XBVR scans, so minutes are plenty — and it
+// keeps every Groups view from re-paging all of XBVR, which crawls on
+// big libraries (every Find-versions search reloads the view).
+const ownedCacheTTL = 5 * time.Minute
+
+var ownedCache struct {
+	sync.Mutex
+	at   time.Time
+	list []xbvr.OwnedScene
+}
+
+// getOwned returns the cached XBVR library snapshot, refreshing it past
+// ownedCacheTTL. A failed refresh keeps serving the stale snapshot:
+// XBVR blips must neither strip every In-library chip nor stall the
+// page on a full re-page retry.
+func getOwned(xc *xbvr.Client) []xbvr.OwnedScene {
+	ownedCache.Lock()
+	defer ownedCache.Unlock()
+	if time.Since(ownedCache.at) < ownedCacheTTL {
+		return ownedCache.list
+	}
+	list, err := xc.ListOwned()
+	if err != nil {
+		log.Printf("library snapshot unavailable: %v", err)
+		return ownedCache.list
+	}
+	ownedCache.at, ownedCache.list = time.Now(), list
+	return list
+}
+
 func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.ResponseWriter, r *http.Request) {
 	items, err := db.Get(500)
 	if err != nil {
@@ -263,12 +295,9 @@ func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Respo
 	} else {
 		log.Printf("groups: wishlist unavailable: %v", err)
 	}
-	var owned []xbvr.OwnedScene
-	if os, err := xc.ListOwned(); err == nil {
-		owned = os
-	} else {
-		log.Printf("groups: library unavailable: %v", err)
-	}
+	// The library snapshot is cached (getOwned): re-paging all of XBVR
+	// on every view is what made Groups crawl on big libraries.
+	owned := getOwned(xc)
 	vrOnly := r.URL.Query().Get("vr") != "0"
 	q := r.URL.Query().Get("q")
 	items = filterQuery(items, q)
@@ -707,14 +736,10 @@ func serveWishlist(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Res
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
-	// Owned flags are best-effort here too: the wishlist itself already
-	// required XBVR, but a library failure must not fail the view.
-	var owned []xbvr.OwnedScene
-	if os, err := xc.ListOwned(); err == nil {
-		owned = os
-	} else {
-		log.Printf("wishlist view: library unavailable: %v", err)
-	}
+	// Owned flags are best-effort here too (cached snapshot): the
+	// wishlist itself already required XBVR, but a library failure
+	// must not fail the view.
+	owned := getOwned(xc)
 	groups := buildGroupViews(emp.Profile{}, cfg, wishlist, owned, items, true)
 	out := []wantedView{}
 	for _, want := range wishlist {

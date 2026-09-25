@@ -15,6 +15,47 @@ import (
 	"wankarr/internal/xbvr"
 )
 
+// The library snapshot is cached: the second view in a row makes no
+// new XBVR request, and a failed refresh past TTL keeps the stale list.
+func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
+	ownedCache.at, ownedCache.list = time.Time{}, nil
+	var calls int
+	fail := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if fail {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"scenes": []map[string]any{{
+				"id": 3, "scene_id": "vp-1", "title": "SfizyDyd", "site": "Virtual Papi",
+				"file": []map[string]any{{"video_height": 720}},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	xc := xbvr.NewClient(srv.URL)
+	got := getOwned(xc)
+	if len(got) != 1 || got[0].BestHeight != 720 {
+		t.Fatalf("snapshot = %+v, want one 720p scene", got)
+	}
+	if again := getOwned(xc); len(again) != 1 {
+		t.Fatalf("cached = %+v, want 1", again)
+	}
+	if calls != 1 {
+		t.Fatalf("xbvr calls = %d, want 1 (second served from cache)", calls)
+	}
+	ownedCache.at = time.Time{}
+	fail = true
+	if stale := getOwned(xc); len(stale) != 1 {
+		t.Fatalf("stale = %+v, want the cached scene", stale)
+	}
+	if calls != 2 {
+		t.Fatalf("xbvr calls = %d, want 2 (one retry, then stale)", calls)
+	}
+}
+
 // Groups already matched in the XBVR library carry their best local
 // height; unowned groups carry none.
 func TestBuildGroupViewsMarksOwned(t *testing.T) {
