@@ -73,6 +73,7 @@ jobs:
         run: |
           mkdir -p pages/dl
           cp dist/*.spk dist/*.icon_72.png dist/*.icon_256.png pages/dl/
+          cp update.sh pages/update.sh
           go run ./tools/mkcatalog \
             --manifests 'dist/*.manifest.json' \
             --assets "https://motorotor.github.io/wankarr/dl" \

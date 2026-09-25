@@ -110,7 +110,7 @@ arch from the catalog and installs it with `synopkg` (the same in-place
 upgrade Package Center performs, data preserved):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/moToroTor/wankarr/main/update.sh -o /tmp/update.sh
+curl -fsSL -o /tmp/update.sh https://motorotor.github.io/wankarr/update.sh
 sudo sh /tmp/update.sh          # or: sh /tmp/update.sh --check
 ```
 
