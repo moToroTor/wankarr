@@ -273,6 +273,53 @@ func TestGroupKeyStripsBareResolution(t *testing.T) {
 	}
 }
 
+// Trailing square-bracket variant blocks strip like parentheticals,
+// but a parenthetical they uncover is identity and stays.
+func TestGroupKeyStripsBracketVariants(t *testing.T) {
+	cases := []struct{ title, want string }{
+		{
+			"[Virtual Papi] SfizyDyd (Next Door Peep) [VR, 60 FPS, 180°, 6K, 3072p] [Oculus Rift / Vive]",
+			"[virtual papi] sfizydyd (next door peep)",
+		},
+		{"Studio - Scene Name [4K]", "studio - scene name"},
+		{"Studio - Scene Name [Oculus] (8K)", "studio - scene name"},
+	}
+	for _, tc := range cases {
+		if got := GroupKey(tc.title); got != tc.want {
+			t.Errorf("GroupKey(%q) = %q, want %q", tc.title, got, tc.want)
+		}
+	}
+}
+
+// The reported pair: a bare-2K upload and a bracketed-6K upload of the
+// same scene cluster into one group under one resolution-free key.
+func TestGroupClustersBracketAndBareVariants(t *testing.T) {
+	mk := func(id, title string) store.Item {
+		return store.Item{GroupID: id, Title: title,
+			Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30,
+			PubDate: time.Now().UTC(), FetchedAt: time.Now().UTC()}
+	}
+	groups := Group([]store.Item{
+		mk("a", "[Virtual Papi] SfizyDyd (Next Door Peep) 2K"),
+		mk("b", "[Virtual Papi] SfizyDyd (Next Door Peep) [VR, 60 FPS, 180°, 6K, 3072p] [Oculus Rift / Vive]"),
+	})
+	if len(groups) != 1 {
+		keys := []string{}
+		for k := range groups {
+			keys = append(keys, k)
+		}
+		t.Fatalf("groups = %d %v, want 1", len(groups), keys)
+	}
+	for k, vs := range groups {
+		if k != "[virtual papi] sfizydyd (next door peep)" {
+			t.Errorf("key = %q, want the shared identity key", k)
+		}
+		if len(vs) != 2 {
+			t.Errorf("variants = %d, want 2", len(vs))
+		}
+	}
+}
+
 // Same scene uploaded at two bare resolutions clusters into one group.
 func TestGroupClustersBareResolutionVariants(t *testing.T) {
 	mk := func(id, title string) store.Item {

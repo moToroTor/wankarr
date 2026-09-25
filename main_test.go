@@ -10,9 +10,40 @@ import (
 	"time"
 
 	"wankarr/internal/config"
+	"wankarr/internal/emp"
 	"wankarr/internal/store"
 	"wankarr/internal/xbvr"
 )
+
+// Groups already matched in the XBVR library carry their best local
+// height; unowned groups carry none.
+func TestBuildGroupViewsMarksOwned(t *testing.T) {
+	items := []store.Item{
+		{GroupID: "a", Title: "[Virtual Papi] SfizyDyd (Next Door Peep) 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30},
+		{GroupID: "b", Title: "Some Other Scene 4K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30},
+	}
+	owned := []xbvr.OwnedScene{
+		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720},
+	}
+	views := buildGroupViews(emp.Profile{}, &config.Config{}, nil, owned, items, false)
+	if len(views) != 2 {
+		t.Fatalf("views = %d, want 2", len(views))
+	}
+	for _, v := range views {
+		switch v.Key {
+		case "[virtual papi] sfizydyd (next door peep)":
+			if v.OwnedHeight != 720 {
+				t.Errorf("owned group height = %d, want 720", v.OwnedHeight)
+			}
+		case "some other scene":
+			if v.OwnedHeight != 0 {
+				t.Errorf("unowned group height = %d, want 0", v.OwnedHeight)
+			}
+		default:
+			t.Errorf("unexpected group key %q", v.Key)
+		}
+	}
+}
 
 func TestFilterQuery(t *testing.T) {
 	items := []store.Item{

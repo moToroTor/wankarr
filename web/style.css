@@ -10,6 +10,7 @@ input[type=search] { background: #1d2025; border: 1px solid #444; color: inherit
 .group h2 { font-size: 1.05rem; margin: 0 0 .2rem; font-weight: 600; }
 .cover { width: 112px; height: auto; border-radius: 4px; flex-shrink: 0; }
 .wanted { color: #ffd75e; font-size: .85rem; }
+.owned { color: #7ee787; font-size: .85rem; }
 table { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .9rem; }
 th, td { text-align: left; padding: .3rem .5rem; border-top: 1px solid #2c3037; }
 tr.pick td { background: #1e2c1e; }

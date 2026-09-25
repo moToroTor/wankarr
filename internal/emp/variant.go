@@ -23,6 +23,8 @@ var resTags = []struct {
 
 var trailingVariantRe = regexp.MustCompile(`\s*\([^()]*\)\s*$`)
 
+var trailingBracketRe = regexp.MustCompile(`\s*\[[^\[\]]*\]\s*$`)
+
 // hbrTitleRe spots high-bitrate signals in the title itself: uploaders
 // mark HBR variants "(Oculus 8K, HBR)", "(Oculus 8K, HQ)", or with
 // "high bitrate" in various spellings. This is a fallback for records
@@ -44,14 +46,26 @@ type Variant struct {
 var ResToken = regexp.MustCompile(`^(\d{3,4}p|[24568]k|uhd|fhd|qhd|hd|sd)$`)
 
 // GroupKey normalizes a title for clustering: the scene identity is the
-// title minus the trailing variant parenthetical ("(Oculus 8K, UHD)")
-// and minus bare resolution tokens ("2K", "4096p"). The key doubles as
-// the Find-versions Jackett query, so a lingering "2K" would hide the
-// 4K/8K uploads of the same scene.
+// title minus trailing variant parentheticals ("(Oculus 8K, UHD)"),
+// trailing square-bracket variant blocks ("[VR, 60 FPS, 180°, 6K, 3072p]
+// [Oculus Rift / Vive]"), and bare resolution tokens ("2K", "4096p").
+// Brackets strip after parens, never re-exposing them: a parenthetical
+// uncovered by bracket removal ("(Next Door Peep)") is scene identity,
+// not a variant signal, so it stays. The key doubles as the
+// Find-versions Jackett query, so a lingering "2K" would hide the 4K/8K
+// uploads of the same scene.
 func GroupKey(title string) string {
 	key := strings.TrimSpace(title)
 	for {
 		next := trailingVariantRe.ReplaceAllString(key, "")
+		next = strings.TrimSpace(next)
+		if next == key {
+			break
+		}
+		key = next
+	}
+	for {
+		next := trailingBracketRe.ReplaceAllString(key, "")
 		next = strings.TrimSpace(next)
 		if next == key {
 			break

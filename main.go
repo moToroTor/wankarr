@@ -244,6 +244,9 @@ type groupView struct {
 	Variants    []variantView `json:"variants"`
 	WantedScene string        `json:"wanted_scene,omitempty"`
 	WantedScore float64       `json:"wanted_score,omitempty"`
+	// OwnedHeight is the best local file height when the scene is
+	// already matched in the XBVR library (0 when not owned).
+	OwnedHeight int `json:"owned_height,omitempty"`
 }
 
 func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.ResponseWriter, r *http.Request) {
@@ -252,23 +255,30 @@ func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Respo
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
-	// Wishlist enrichment is best-effort: XBVR down means no wanted flags,
-	// never a failed page.
+	// Wishlist and library enrichment is best-effort: XBVR down means
+	// no wanted/owned flags, never a failed page.
 	var wishlist []xbvr.WantedScene
 	if ws, err := xc.ListWishlist(); err == nil {
 		wishlist = ws
 	} else {
 		log.Printf("groups: wishlist unavailable: %v", err)
 	}
+	var owned []xbvr.OwnedScene
+	if os, err := xc.ListOwned(); err == nil {
+		owned = os
+	} else {
+		log.Printf("groups: library unavailable: %v", err)
+	}
 	vrOnly := r.URL.Query().Get("vr") != "0"
 	q := r.URL.Query().Get("q")
 	items = filterQuery(items, q)
-	writeJSON(w, buildGroupViews(emp.Profile{}, cfg, wishlist, items, vrOnly))
+	writeJSON(w, buildGroupViews(emp.Profile{}, cfg, wishlist, owned, items, vrOnly))
 }
 
 // buildGroupViews clusters items into enriched scene groups. Wishlist
-// pairing drives the wanted flag and cover preference.
-func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.WantedScene, items []store.Item, vrOnly bool) []groupView {
+// pairing drives the wanted flag and cover preference; library pairing
+// marks groups already matched in XBVR so owned scenes are recognizable.
+func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.WantedScene, owned []xbvr.OwnedScene, items []store.Item, vrOnly bool) []groupView {
 	out := []groupView{}
 	for key, vs := range emp.Group(items) {
 		if vrOnly && !anyVR(vs) {
@@ -301,6 +311,12 @@ func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.Wa
 			if s := match.Score(key, want); s >= 0.6 && s > g.WantedScore {
 				g.WantedScene, g.WantedScore = want.Title, s
 				wantCover = want.CoverURL
+			}
+		}
+		var ownedScore float64
+		for _, o := range owned {
+			if s := match.ScoreTitle(key, o.Title, o.Site, ""); s >= 0.6 && s > ownedScore {
+				ownedScore, g.OwnedHeight = s, o.BestHeight
 			}
 		}
 		// Prefer XBVR's cover on matched groups (it is the canonical
@@ -691,7 +707,15 @@ func serveWishlist(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Res
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
-	groups := buildGroupViews(emp.Profile{}, cfg, wishlist, items, true)
+	// Owned flags are best-effort here too: the wishlist itself already
+	// required XBVR, but a library failure must not fail the view.
+	var owned []xbvr.OwnedScene
+	if os, err := xc.ListOwned(); err == nil {
+		owned = os
+	} else {
+		log.Printf("wishlist view: library unavailable: %v", err)
+	}
+	groups := buildGroupViews(emp.Profile{}, cfg, wishlist, owned, items, true)
 	out := []wantedView{}
 	for _, want := range wishlist {
 		wv := wantedView{

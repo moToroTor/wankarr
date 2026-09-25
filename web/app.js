@@ -70,13 +70,15 @@ document.addEventListener('click', (e) => {
 function groupCard(g) {
   const wanted = g.wanted_scene
     ? `<div class="wanted">Wanted: ${esc(g.wanted_scene)} (score ${Number(g.wanted_score).toFixed(2)})</div>` : '';
+  const owned = g.owned_height
+    ? `<div class="owned">In library: ${esc(String(g.owned_height))}p</div>` : '';
   const cover = g.cover
     ? `<img class="cover" src="${esc(g.cover)}" alt="" loading="lazy" onerror="this.remove()">` : '';
   // The group key is the scene identity minus variant parentheticals
   // and bare resolution tokens, so it doubles as the Jackett query
   // to find other versions.
   return `<article class="group">
-    <div class="group-head">${cover}<div><h2>${esc(g.title)}</h2>${wanted}
+    <div class="group-head">${cover}<div><h2>${esc(g.title)}</h2>${wanted}${owned}
     <button data-search-query="${esc(g.key)}" data-search-title="${esc(g.title)}" title="Search Jackett for other versions of this scene">Find versions</button>
     </div></div>
     <table><thead><tr><th>Variant</th><th>Size</th><th>Published</th><th>Note</th><th></th></tr></thead>

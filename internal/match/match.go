@@ -37,7 +37,14 @@ var stopwords = map[string]bool{
 // tokens of the XBVR title must appear in the group key for a nonzero
 // score; a studio/site token match adds a bonus.
 func Score(groupKey string, w xbvr.WantedScene) float64 {
-	titleToks := significant(normalize(w.Title))
+	return ScoreTitle(groupKey, w.Title, w.Site, w.Studio)
+}
+
+// ScoreTitle rates a group key against a bare title plus site/studio
+// names: the same overlap as Score for library scenes, which are not
+// wishlist entries.
+func ScoreTitle(groupKey, title, site, studio string) float64 {
+	titleToks := significant(normalize(title))
 	if len(titleToks) == 0 {
 		return 0
 	}
@@ -55,7 +62,7 @@ func Score(groupKey string, w xbvr.WantedScene) float64 {
 		return 0
 	}
 	score := float64(hit) / float64(len(titleToks))
-	if studioHit(groupKey, w) {
+	if studioHitName(groupKey, site, studio) {
 		score += 0.2
 	}
 	if score > 1 {
@@ -80,8 +87,13 @@ func significant(toks []string) []string {
 // studioHit reports whether the studio/site name appears in the group key
 // or the Emp title carries the studio as a "Name - ..." prefix.
 func studioHit(groupKey string, w xbvr.WantedScene) bool {
+	return studioHitName(groupKey, w.Site, w.Studio)
+}
+
+// studioHitName is studioHit over bare site/studio names.
+func studioHitName(groupKey, site, studio string) bool {
 	key := strings.ToLower(groupKey)
-	for _, name := range []string{w.Site, w.Studio} {
+	for _, name := range []string{site, studio} {
 		n := strings.ToLower(strings.TrimSpace(name))
 		if n == "" {
 			continue

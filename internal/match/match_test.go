@@ -25,6 +25,15 @@ func TestScoreIgnoresResolution(t *testing.T) {
 	}
 }
 
+// ScoreTitle over the same fields agrees with Score exactly.
+func TestScoreTitleMatchesScore(t *testing.T) {
+	key := emp.GroupKey("FuckPassVR - Rainy City Rendezvous - Mia James (2026.08.28) (Oculus 8K, UHD)")
+	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR", Studio: "FuckPassVR"}
+	if a, b := Score(key, w), ScoreTitle(key, w.Title, w.Site, w.Studio); a != b {
+		t.Errorf("Score = %v, ScoreTitle = %v, want equal", a, b)
+	}
+}
+
 func TestScoreRejectsUnrelated(t *testing.T) {
 	key := emp.GroupKey("VRCosplayX - The Legend of Vox Machina: Keyleth A XXX Parody - Gracey Snow (2026.09.17) (Oculus 8K)")
 	w := xbvr.WantedScene{SceneID: "fp-1", Title: "Rainy City Rendezvous", Site: "FuckPassVR"}
