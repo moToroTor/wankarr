@@ -88,9 +88,69 @@ function groupCard(g) {
 
 let activeQuery = '';
 let activePage = 1;
+// A search result summary parked here survives the groups reload that
+// follows every search (showGroups owns the status line and would
+// otherwise clobber it before it can be read).
+let statusNote = '';
+
+const VIEWS = ['groups', 'wishlist', 'matches'];
+
+// The URL hash is the single source of truth for navigation state, so
+// browser back/forward works: every view, search, filter, and page
+// change writes one history entry, and popstate re-renders from it.
+function defaultState() {
+  return { view: 'groups', q: '', page: 1, vrOnly: $('#vr-only').checked };
+}
+
+function readURLState() {
+  const s = defaultState();
+  const m = /^#\/([^?]*)(\?(.*))?$/.exec(location.hash || '');
+  if (!m) return s;
+  if (VIEWS.includes(m[1])) s.view = m[1];
+  if (m[3]) {
+    const params = new URLSearchParams(m[3]);
+    s.q = params.get('q') || '';
+    s.page = Math.max(1, parseInt(params.get('page') || '1', 10) || 1);
+    s.vrOnly = params.get('vr') !== '0';
+  }
+  return s;
+}
+
+function serializeState(s) {
+  const params = new URLSearchParams();
+  if (s.q) params.set('q', s.q);
+  if (s.page > 1) params.set('page', String(s.page));
+  if (!s.vrOnly) params.set('vr', '0');
+  const qs = params.toString();
+  return `#/${s.view}${qs ? `?${qs}` : ''}`;
+}
+
+let currentState = null;
+
+// One entry per change: back walks views, searches, filters, and pages
+// in the order they happened. Identical states are skipped so
+// double-clicks don't stack dead entries.
+function navigate(patch) {
+  const next = { ...(currentState || defaultState()), ...patch };
+  if (currentState && serializeState(next) === serializeState(currentState)) return;
+  history.pushState(next, '', serializeState(next));
+  applyState(next);
+}
+
+function applyState(s) {
+  currentState = s;
+  activeQuery = s.q;
+  activePage = s.page;
+  $('#vr-only').checked = s.vrOnly;
+  $('#search-q').value = s.q;
+  renderView(s.view);
+}
 
 async function showGroups() {
   setStatus('Loading groups…');
+  const note = statusNote;
+  statusNote = '';
+  const suffix = note ? ` — ${note}` : '';
   try {
     const params = new URLSearchParams();
     if (!$('#vr-only').checked) params.set('vr', '0');
@@ -108,18 +168,13 @@ async function showGroups() {
       ? res.groups.map(groupCard).join('')
       : '<p>No matching groups. Poll an RSS feed or run a search.</p>') + pager;
     const clear = $('#clear-q');
-    if (clear) clear.addEventListener('click', () => {
-      activeQuery = '';
-      activePage = 1;
-      $('#search-q').value = '';
-      showGroups();
-    });
+    if (clear) clear.addEventListener('click', () => navigate({ q: '', page: 1 }));
     const prev = $('#prev-p');
-    if (prev) prev.addEventListener('click', () => { activePage--; showGroups(); });
+    if (prev) prev.addEventListener('click', () => { if (activePage > 1) navigate({ page: activePage - 1 }); });
     const next = $('#next-p');
-    if (next) next.addEventListener('click', () => { activePage++; showGroups(); });
-    setStatus(`Page ${res.page} of ${pages} · ${res.total} scene group(s).`);
-  } catch (e) { setStatus(`Error: ${e.message}`); }
+    if (next) next.addEventListener('click', () => navigate({ page: activePage + 1 }));
+    setStatus(`Page ${res.page} of ${pages} · ${res.total} scene group(s).${suffix}`);
+  } catch (e) { setStatus(`Error: ${e.message}${suffix}`); }
 }
 
 async function showMatches() {
@@ -134,7 +189,7 @@ async function showMatches() {
   } catch (e) { setStatus(`Error: ${e.message}`); }
 }
 
-function switchView(name) {
+function renderView(name) {
   document.querySelectorAll('nav button').forEach((b) =>
     b.classList.toggle('active', b.dataset.view === name));
   $('#groups-view').hidden = name !== 'groups';
@@ -144,6 +199,12 @@ function switchView(name) {
   else if (name === 'wishlist') showWishlist();
   else showMatches();
 }
+
+// Back/forward restores the recorded state object; the URL parse is a
+// fallback for entries this script didn't create.
+window.addEventListener('popstate', (e) => {
+  applyState(e.state && e.state.view ? e.state : readURLState());
+});
 
 async function showWishlist() {
   setStatus('Loading wishlist from XBVR…');
@@ -178,11 +239,8 @@ async function searchTitle(query, title, btn) {
   setStatus(`Searching Emp for “${title}”… (one Jackett query, results cached)`);
   try {
     const r = await fetchJSON(`/api/search?q=${encodeURIComponent(query)}`);
-    setStatus(`Search complete: ${r.results} result(s), ${r.new} new.`);
-    activeQuery = query;
-    activePage = 1;
-    $('#search-q').value = query;
-    switchView('groups');
+    statusNote = `Search complete: ${r.results} result(s), ${r.new} new.`;
+    navigate({ view: 'groups', q: query, page: 1 });
   } catch (e) {
     setStatus(`Search error: ${e.message}`);
     if (btn) btn.disabled = false;
@@ -190,9 +248,9 @@ async function searchTitle(query, title, btn) {
 }
 
 document.querySelectorAll('nav button').forEach((b) =>
-  b.addEventListener('click', () => switchView(b.dataset.view)));
+  b.addEventListener('click', () => navigate({ view: b.dataset.view })));
 
-$('#vr-only').addEventListener('change', () => { activePage = 1; switchView('groups'); });
+$('#vr-only').addEventListener('change', () => navigate({ view: 'groups', page: 1, vrOnly: $('#vr-only').checked }));
 
 $('#rematch').addEventListener('click', async () => {
   setStatus('Re-matching index against wishlist…');
@@ -209,5 +267,9 @@ $('#search-form').addEventListener('submit', async (e) => {
   searchTitle(q, q, null);
 });
 
-switchView('groups');
+// Normalize the URL to a recorded entry (no extra history item), so
+// the first back press leaves the app instead of landing nowhere.
+currentState = readURLState();
+history.replaceState(currentState, '', serializeState(currentState));
+applyState(currentState);
 showMatches();
