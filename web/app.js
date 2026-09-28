@@ -67,6 +67,14 @@ document.addEventListener('click', (e) => {
   if (sbtn) searchTitle(sbtn.dataset.searchQuery, sbtn.dataset.searchTitle, sbtn);
 });
 
+// Scene dates are grouping identity, but they narrow tracker searches
+// to uploads carrying the date and hide date-less variants from the
+// filtered view — Find-versions queries drop them.
+function searchQuery(key) {
+  const q = key.replace(/\s*\(\d{4}[.\-/]\d{2}[.\-/]\d{2}\)/g, '').replace(/\s+/g, ' ').trim();
+  return q || key;
+}
+
 function groupCard(g) {
   const wanted = g.wanted_scene
     ? `<div class="wanted">Wanted: ${esc(g.wanted_scene)} (score ${Number(g.wanted_score).toFixed(2)})</div>` : '';
@@ -79,7 +87,7 @@ function groupCard(g) {
   // to find other versions.
   return `<article class="group">
     <div class="group-head">${cover}<div><h2>${esc(g.title)}</h2>${wanted}${owned}
-    <button data-search-query="${esc(g.key)}" data-search-title="${esc(g.title)}" title="Search Jackett for other versions of this scene">Find versions</button>
+    <button data-search-query="${esc(searchQuery(g.key))}" data-search-title="${esc(g.title)}" title="Search Jackett for other versions of this scene">Find versions</button>
     </div></div>
     <table><thead><tr><th>Variant</th><th>Size</th><th>Published</th><th>Note</th><th></th></tr></thead>
     <tbody>${g.variants.map(variantRow).join('')}</tbody></table>
