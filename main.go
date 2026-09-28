@@ -253,6 +253,9 @@ type groupView struct {
 	// verifiable — a height alone can't be checked against XBVR.
 	OwnedHeight int    `json:"owned_height,omitempty"`
 	OwnedTitle  string `json:"owned_title,omitempty"`
+	// newest is the latest variant publish date, for newest-first
+	// ordering. Unexported: ordering input only, never serialized.
+	newest time.Time
 }
 
 // ownedCacheTTL bounds how stale the In-library chips can get. The
@@ -326,15 +329,30 @@ type groupsPage struct {
 	PerPage int         `json:"per_page"`
 }
 
-// pageViews sorts views deterministically (Go map order is random, and
-// pagination needs stability) and returns one 1-based page plus the
-// total. Out-of-range pages return an empty page, never an error.
+// pageViews sorts views newest-first by latest variant publish date, so
+// the page reads as "what's new". Deterministic (Go map order is random,
+// and pagination needs stability); ties fall back to title, then key.
+// Future dates (tracker clock skew) clamp to now for ordering only, so
+// they can't pin items to the top — displayed dates stay verbatim.
+// Returns one 1-based page plus the total; out-of-range pages return an
+// empty page, never an error.
 func pageViews(views []groupView, page, perPage int) ([]groupView, int) {
 	total := len(views)
+	now := time.Now()
+	effective := func(t time.Time) time.Time {
+		if t.After(now) {
+			return now
+		}
+		return t
+	}
 	sort.SliceStable(views, func(i, j int) bool {
-		ti, tj := strings.ToLower(views[i].Title), strings.ToLower(views[j].Title)
-		if ti != tj {
-			return ti < tj
+		ti, tj := effective(views[i].newest), effective(views[j].newest)
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		li, lj := strings.ToLower(views[i].Title), strings.ToLower(views[j].Title)
+		if li != lj {
+			return li < lj
 		}
 		return views[i].Key < views[j].Key
 	})
@@ -362,6 +380,11 @@ func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.Wa
 			continue
 		}
 		g := groupView{Key: key, Title: vs[0].Item.Title}
+		for _, v := range vs {
+			if v.Item.PubDate.After(g.newest) {
+				g.newest = v.Item.PubDate
+			}
+		}
 		pick := profile.Pick(vs)
 		var biggestPlain int64
 		for _, v := range vs {

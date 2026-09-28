@@ -117,6 +117,32 @@ func TestPageViewsPaginatesAndSorts(t *testing.T) {
 	}
 }
 
+// Newest-first: groups order by latest variant date; future dates clamp
+// to now (tracker clock skew must not pin items to the top); ties fall
+// back to title order.
+func TestPageViewsNewestFirst(t *testing.T) {
+	now := time.Now()
+	views := []groupView{
+		{Key: "old", Title: "Old Scene", newest: now.Add(-time.Hour)},
+		{Key: "future", Title: "Future Scene", newest: now.Add(24 * time.Hour)},
+		{Key: "recent", Title: "Recent Scene", newest: now.Add(-30 * time.Minute)},
+	}
+	got, total := pageViews(views, 1, 10)
+	if total != 3 {
+		t.Fatalf("total = %d, want 3", total)
+	}
+	want := []string{"Future Scene", "Recent Scene", "Old Scene"}
+	for i, w := range want {
+		if got[i].Title != w {
+			var order []string
+			for _, v := range got {
+				order = append(order, v.Title)
+			}
+			t.Fatalf("order = %v, want %v", order, want)
+		}
+	}
+}
+
 // A Jaccard-killed group is still marked owned when a variant is
 // byte-equal to an owned file of the fully-named scene.
 func TestBuildGroupViewsRescuesByteEqual(t *testing.T) {
