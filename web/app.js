@@ -67,11 +67,13 @@ document.addEventListener('click', (e) => {
   if (sbtn) searchTitle(sbtn.dataset.searchQuery, sbtn.dataset.searchTitle, sbtn);
 });
 
-// Scene dates are grouping identity, but they narrow tracker searches
-// to uploads carrying the date and hide date-less variants from the
-// filtered view — Find-versions queries drop them.
+// Scene dates are grouping identity, and the leading uploader tag
+// ("[vrdome / sexlikereal]") never appears literally in sibling
+// uploads ("[sexlikereal.com/vrdome] …") — but both ride along in the
+// Find-versions query, hiding those siblings from the filtered view.
+// Queries drop them; grouping keeps them.
 function searchQuery(key) {
-  const q = key.replace(/\s*\(\d{4}[.\-/]\d{2}[.\-/]\d{2}\)/g, '').replace(/\s+/g, ' ').trim();
+  const q = key.replace(/\s*\(\d{4}[.\-/]\d{2}[.\-/]\d{2}\)/g, '').replace(/^\[[^\]]*\]\s*/, '').replace(/\s+/g, ' ').trim();
   return q || key;
 }
 
@@ -242,8 +244,22 @@ function wishlistCard(it) {
     </div></div>${known}</article>`;
 }
 
+// Search mode comes from the Local/Live toggle by the search box and
+// every entry point (search box, Find versions, Search Emp) follows
+// it: local filters the cached index with no Jackett traffic, live
+// fires one Jackett query first.
+function searchLive() {
+  const picked = document.querySelector('input[name="search-mode"]:checked');
+  return picked ? picked.value === 'live' : false;
+}
+
 async function searchTitle(query, title, btn) {
   if (btn) btn.disabled = true;
+  if (!searchLive()) {
+    statusNote = 'local cache only (no Jackett query)';
+    navigate({ view: 'groups', q: query, page: 1 });
+    return;
+  }
   // The title names the scene; the query is what Jackett actually
   // receives, so show it whenever stripping made them differ.
   const sent = query !== title ? ` (query: “${query}”)` : '';

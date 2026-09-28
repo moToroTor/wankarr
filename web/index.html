@@ -15,7 +15,9 @@
     <button data-view="matches">New matches <span id="match-count"></span></button>
   </nav>
   <form id="search-form">
-    <input id="search-q" type="search" placeholder="Search Emp via Jackett…" aria-label="Search Emp">
+    <input id="search-q" type="search" placeholder="Filter cache or search Emp…" aria-label="Search">
+    <label title="Filter the cached index only — no Jackett traffic"><input type="radio" name="search-mode" value="local" checked> Local</label>
+    <label title="Query Jackett first, then filter"><input type="radio" name="search-mode" value="live"> Live</label>
     <button type="submit">Search</button>
   </form>
   <button id="rematch" title="Re-check the whole index against the XBVR wishlist">Rematch wishlist</button>
