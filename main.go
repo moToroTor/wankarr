@@ -31,6 +31,10 @@ import (
 	"wankarr/internal/xbvr"
 )
 
+// version is the release tag (v0.1.x), stamped at build time with
+// -ldflags "-X main.version=...". Local builds report "dev".
+var version = "dev"
+
 //go:embed web/index.html web/app.js web/style.css
 var webFiles embed.FS
 
@@ -97,6 +101,9 @@ func main() {
 	})
 	mux.HandleFunc("/api/wishlist", func(w http.ResponseWriter, r *http.Request) {
 		serveWishlist(db, cfg, xc, w, r)
+	})
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		serveVersion(w, r)
 	})
 	mux.HandleFunc("/api/rematch", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -498,6 +505,12 @@ func humanBytes(n int64) string {
 	}
 	units := []string{"KiB", "MiB", "GiB", "TiB"}
 	return fmt.Sprintf("%.1f %s", float64(n)/float64(div), units[exp])
+}
+
+// serveVersion reports the stamped release tag so the UI can show
+// which build is running.
+func serveVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"version": version})
 }
 
 // serveSearch runs one explicit Jackett/Torznab query, stores results,

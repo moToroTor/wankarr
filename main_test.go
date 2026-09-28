@@ -458,3 +458,15 @@ func TestServeSendNoPendingWithoutWishlistMatch(t *testing.T) {
 		t.Fatalf("pending = %+v, want none", pend)
 	}
 }
+
+func TestServeVersionReportsBuild(t *testing.T) {
+	rec := httptest.NewRecorder()
+	serveVersion(rec, httptest.NewRequest(http.MethodGet, "/api/version", nil))
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["version"] != version || version == "" {
+		t.Errorf("version = %v, want build stamp %q", got["version"], version)
+	}
+}

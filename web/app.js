@@ -244,7 +244,10 @@ function wishlistCard(it) {
 
 async function searchTitle(query, title, btn) {
   if (btn) btn.disabled = true;
-  setStatus(`Searching Emp for “${title}”… (one Jackett query, results cached)`);
+  // The title names the scene; the query is what Jackett actually
+  // receives, so show it whenever stripping made them differ.
+  const sent = query !== title ? ` (query: “${query}”)` : '';
+  setStatus(`Searching Emp for “${title}”…${sent} (one Jackett query, results cached)`);
   try {
     const r = await fetchJSON(`/api/search?q=${encodeURIComponent(query)}`);
     statusNote = `Search complete: ${r.results} result(s), ${r.new} new.`;
@@ -277,6 +280,13 @@ $('#search-form').addEventListener('submit', async (e) => {
 
 // Normalize the URL to a recorded entry (no extra history item), so
 // the first back press leaves the app instead of landing nowhere.
+// Header build stamp: shows which release is actually running, so a
+// fix can be confirmed deployed without guessing.
+fetchJSON('/api/version').then(
+  (v) => { if (v && v.version) $('#app-version').textContent = v.version; },
+  () => {},
+);
+
 currentState = readURLState();
 history.replaceState(currentState, '', serializeState(currentState));
 applyState(currentState);
