@@ -64,7 +64,7 @@ document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-send]');
   if (btn) sendTorrent(btn.dataset.send, btn);
   const sbtn = e.target.closest('[data-search-query]');
-  if (sbtn) searchTitle(sbtn.dataset.searchQuery, sbtn.dataset.searchTitle, sbtn);
+  if (sbtn) filterCache(sbtn.dataset.searchQuery);
 });
 
 // Scene dates are grouping identity, and the leading uploader tag
@@ -89,7 +89,7 @@ function groupCard(g) {
   // to find other versions.
   return `<article class="group">
     <div class="group-head">${cover}<div><h2>${esc(g.title)}</h2>${wanted}${owned}
-    <button data-search-query="${esc(searchQuery(g.key))}" data-search-title="${esc(g.title)}" title="Search Jackett for other versions of this scene">Find versions</button>
+    <button data-search-query="${esc(searchQuery(g.key))}" title="Show cached versions of this scene">Find versions</button>
     </div></div>
     <table><thead><tr><th>Variant</th><th>Size</th><th>Published</th><th>Note</th><th></th></tr></thead>
     <tbody>${g.variants.map(variantRow).join('')}</tbody></table>
@@ -170,7 +170,7 @@ async function showGroups() {
     activePage = res.page;
     const pages = Math.max(1, Math.ceil(res.total / res.per_page));
     const filterNote = activeQuery
-      ? `<p>Filtered to “${esc(activeQuery)}” <button id="clear-q">show all</button></p>` : '';
+      ? `<p>Filtered to “${esc(activeQuery)}” <button id="clear-q">show all</button> <button id="jackett-refresh" title="Query Jackett for this filter, then re-filter">↻ Jackett refresh</button></p>` : '';
     const pager = pages > 1
       ? `<p><button id="prev-p"${res.page <= 1 ? ' disabled' : ''}>← Prev</button> Page ${res.page} of ${pages} · ${res.total} groups <button id="next-p"${res.page >= pages ? ' disabled' : ''}>Next →</button></p>`
       : '';
@@ -179,6 +179,8 @@ async function showGroups() {
       : '<p>No matching groups. Poll an RSS feed or run a search.</p>') + pager;
     const clear = $('#clear-q');
     if (clear) clear.addEventListener('click', () => navigate({ q: '', page: 1 }));
+    const refresh = $('#jackett-refresh');
+    if (refresh) refresh.addEventListener('click', () => liveRefresh(activeQuery, refresh));
     const prev = $('#prev-p');
     if (prev) prev.addEventListener('click', () => { if (activePage > 1) navigate({ page: activePage - 1 }); });
     const next = $('#next-p');
@@ -240,30 +242,21 @@ function wishlistCard(it) {
     ${it.cover ? `<img class="cover" src="${esc(it.cover)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
     <div><h2>${esc(it.title)}</h2>
     <div class="wanted">${esc(it.site || '')}${who ? ` · ${esc(who)}` : ''}</div>
-    <button data-search-query="${esc(query)}" data-search-title="${esc(it.title)}">Search Emp</button>
+    <button data-search-query="${esc(query)}" title="Show cached Emp groups for this scene">Find versions</button>
     </div></div>${known}</article>`;
 }
 
-// Search mode comes from the Local/Live toggle by the search box and
-// every entry point (search box, Find versions, Search Emp) follows
-// it: local filters the cached index with no Jackett traffic, live
-// fires one Jackett query first.
-function searchLive() {
-  const picked = document.querySelector('input[name="search-mode"]:checked');
-  return picked ? picked.value === 'live' : false;
+// Only the refresh button on filtered results fires a Jackett query.
+// The search box and card buttons (Find versions, Search Emp) filter
+// the cached index, so browsing never causes tracker traffic.
+function filterCache(query) {
+  statusNote = 'local cache only (no Jackett query)';
+  navigate({ view: 'groups', q: query, page: 1 });
 }
 
-async function searchTitle(query, title, btn) {
+async function liveRefresh(query, btn) {
   if (btn) btn.disabled = true;
-  if (!searchLive()) {
-    statusNote = 'local cache only (no Jackett query)';
-    navigate({ view: 'groups', q: query, page: 1 });
-    return;
-  }
-  // The title names the scene; the query is what Jackett actually
-  // receives, so show it whenever stripping made them differ.
-  const sent = query !== title ? ` (query: “${query}”)` : '';
-  setStatus(`Searching Emp for “${title}”…${sent} (one Jackett query, results cached)`);
+  setStatus(`Refreshing from Jackett for “${query}”… (one query, results cached)`);
   try {
     const r = await fetchJSON(`/api/search?q=${encodeURIComponent(query)}`);
     statusNote = `Search complete: ${r.results} result(s), ${r.new} new.`;
@@ -287,11 +280,11 @@ $('#rematch').addEventListener('click', async () => {
   } catch (e) { setStatus(`Rematch error: ${e.message}`); }
 });
 
-$('#search-form').addEventListener('submit', async (e) => {
+$('#search-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const q = $('#search-q').value.trim();
   if (!q) return;
-  searchTitle(q, q, null);
+  filterCache(q);
 });
 
 // Normalize the URL to a recorded entry (no extra history item), so
