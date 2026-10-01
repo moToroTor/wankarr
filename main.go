@@ -320,7 +320,10 @@ func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Respo
 	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 1 {
 		page = p
 	}
-	views, total := pageViews(buildGroupViews(emp.Profile{}, cfg, wishlist, owned, items, vrOnly), page, groupsPerPage)
+	// Cluster and page the whole index, but match only the visible
+	// slice: page 1 never waits for every group to match.
+	views, total := pageViews(clusterGroups(emp.Profile{}, items, vrOnly), page, groupsPerPage)
+	enrichGroups(cfg, wishlist, owned, views)
 	writeJSON(w, groupsPage{Groups: views, Total: total, Page: page, PerPage: groupsPerPage})
 }
 
@@ -377,10 +380,10 @@ func pageViews(views []groupView, page, perPage int) ([]groupView, int) {
 	return views[start:end], total
 }
 
-// buildGroupViews clusters items into enriched scene groups. Wishlist
-// pairing drives the wanted flag and cover preference; library pairing
-// marks groups already matched in XBVR so owned scenes are recognizable.
-func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.WantedScene, owned match.Library, items []store.Item, vrOnly bool) []groupView {
+// clusterGroups clusters items into scene groups with variant detail.
+// No wishlist/library matching here: callers enrich only the slice
+// they actually serve, so page 1 never waits for the whole index.
+func clusterGroups(profile emp.Profile, items []store.Item, vrOnly bool) []groupView {
 	out := []groupView{}
 	for key, vs := range emp.Group(items) {
 		if vrOnly && !anyVR(vs) {
@@ -413,37 +416,49 @@ func buildGroupViews(profile emp.Profile, cfg *config.Config, wishlist []xbvr.Wa
 			}
 			g.Variants = append(g.Variants, vv)
 		}
-		var wantCover string
-		for _, want := range wishlist {
-			if s := match.Score(key, want); s >= 0.6 && s > g.WantedScore {
-				g.WantedScene, g.WantedScore = want.Title, s
-				wantCover = want.CoverURL
-			}
-		}
-		var variantSizes []int64
+		// Default cover is the first Emp poster; enrichment overwrites
+		// it with XBVR artwork on matched groups.
 		for _, v := range vs {
-			if v.Item.SizeBytes > 0 {
-				variantSizes = append(variantSizes, v.Item.SizeBytes)
-			}
-		}
-		if h, t, ok := owned.Best(key, variantSizes, 0.6); ok {
-			g.OwnedHeight, g.OwnedTitle = h, t
-		}
-		// Prefer XBVR's cover on matched groups (it is the canonical
-		// artwork for the scene); otherwise the newest Emp poster.
-		if wantCover != "" {
-			g.Cover = absolutizeURL(cfg.XBVRURL, wantCover)
-		} else {
-			for _, v := range vs {
-				if v.Item.CoverURL != "" {
-					g.Cover = v.Item.CoverURL
-					break
-				}
+			if v.Item.CoverURL != "" {
+				g.Cover = v.Item.CoverURL
+				break
 			}
 		}
 		out = append(out, g)
 	}
 	return out
+}
+
+// enrichGroups pairs one page of groups against the wishlist and the
+// library snapshot: wanted flags, owned chips, and XBVR covers.
+// Wishlist artwork wins, then library artwork, then the Emp poster.
+func enrichGroups(cfg *config.Config, wishlist []xbvr.WantedScene, owned match.Library, views []groupView) {
+	for i := range views {
+		g := &views[i]
+		var wantCover string
+		for _, want := range wishlist {
+			if s := match.Score(g.Key, want); s >= 0.6 && s > g.WantedScore {
+				g.WantedScene, g.WantedScore = want.Title, s
+				wantCover = want.CoverURL
+			}
+		}
+		var variantSizes []int64
+		for _, v := range g.Variants {
+			if v.SizeBytes > 0 {
+				variantSizes = append(variantSizes, v.SizeBytes)
+			}
+		}
+		var ownedCover string
+		if h, t, c, ok := owned.Best(g.Key, variantSizes, 0.6); ok {
+			g.OwnedHeight, g.OwnedTitle = h, t
+			ownedCover = c
+		}
+		if wantCover != "" {
+			g.Cover = absolutizeURL(cfg.XBVRURL, wantCover)
+		} else if ownedCover != "" {
+			g.Cover = absolutizeURL(cfg.XBVRURL, ownedCover)
+		}
+	}
 }
 
 // filterQuery keeps items matching every token of q (case-insensitive,
@@ -827,7 +842,8 @@ func serveWishlist(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Res
 	// wishlist itself already required XBVR, but a library failure
 	// must not fail the view.
 	owned := getOwned(xc)
-	groups := buildGroupViews(emp.Profile{}, cfg, wishlist, owned, items, true)
+	groups := clusterGroups(emp.Profile{}, items, true)
+	enrichGroups(cfg, wishlist, owned, groups)
 	out := []wantedView{}
 	for _, want := range wishlist {
 		wv := wantedView{

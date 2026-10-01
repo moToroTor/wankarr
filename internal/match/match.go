@@ -168,6 +168,7 @@ type Library struct {
 	heights []int
 	titles  []string
 	sizes   [][]int64
+	covers  []string
 }
 
 // IndexLibrary precomputes the comparison tokens of owned scenes.
@@ -186,15 +187,17 @@ func IndexLibrary(scenes []xbvr.OwnedScene) Library {
 		l.heights = append(l.heights, s.BestHeight)
 		l.titles = append(l.titles, s.Title)
 		l.sizes = append(l.sizes, s.Sizes)
+		l.covers = append(l.covers, s.CoverURL)
 	}
 	return l
 }
 
-// Best returns the best local height and scene title among owned scenes
-// scoring at least threshold against the group key — the same arithmetic
-// as ScoreTitle, with the key tokenized once. Ties keep the first scene,
-// mirroring the inline loop it replaces. The title identifies the match
-// so In-library chips are verifiable, not just claims.
+// Best returns the best local height, scene title, and XBVR cover among
+// owned scenes scoring at least threshold against the group key — the
+// same arithmetic as ScoreTitle, with the key tokenized once. Ties keep
+// the first scene, mirroring the inline loop it replaces. The title
+// identifies the match so In-library chips are verifiable, not just
+// claims; the cover comes from the same snapshot row, no extra query.
 //
 // variantSizes are the group's upload content sizes. When no title-scored
 // match exists, a scene is rescued if every one of its significant tokens
@@ -202,7 +205,7 @@ func IndexLibrary(scenes []xbvr.OwnedScene) Library {
 // file: same name plus same bytes is near-certain even when Jaccard is low
 // (e.g. performer-heavy compilation keys). Rescue fills gaps only — it
 // never overrides a title-scored match.
-func (l Library) Best(groupKey string, variantSizes []int64, threshold float64) (height int, title string, ok bool) {
+func (l Library) Best(groupKey string, variantSizes []int64, threshold float64) (height int, title, cover string, ok bool) {
 	keySet := map[string]bool{}
 	for _, t := range normalize(groupKey) {
 		keySet[t] = true
@@ -210,7 +213,7 @@ func (l Library) Best(groupKey string, variantSizes []int64, threshold float64) 
 	compactKey := nonWord.ReplaceAllString(strings.ToLower(groupKey), "")
 	bestScore := 0.0
 	var rescueHeight int
-	var rescueTitle string
+	var rescueTitle, rescueCover string
 	rescued := false
 	for i, toks := range l.toks {
 		hit := 0
@@ -224,7 +227,7 @@ func (l Library) Best(groupKey string, variantSizes []int64, threshold float64) 
 		}
 		if hit == len(toks) && sizeHit(variantSizes, l.sizes[i]) {
 			if !rescued {
-				rescueHeight, rescueTitle, rescued = l.heights[i], l.titles[i], true
+				rescueHeight, rescueTitle, rescueCover, rescued = l.heights[i], l.titles[i], l.covers[i], true
 			}
 			continue
 		}
@@ -239,13 +242,13 @@ func (l Library) Best(groupKey string, variantSizes []int64, threshold float64) 
 			score = 1
 		}
 		if score >= threshold && score > bestScore {
-			height, title, bestScore, ok = l.heights[i], l.titles[i], score, true
+			height, title, cover, bestScore, ok = l.heights[i], l.titles[i], l.covers[i], score, true
 		}
 	}
 	if !ok && rescued {
-		return rescueHeight, rescueTitle, true
+		return rescueHeight, rescueTitle, rescueCover, true
 	}
-	return height, title, ok
+	return height, title, cover, ok
 }
 
 // AgainstWishlist scores every group against every wanted scene and

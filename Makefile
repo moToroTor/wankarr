@@ -34,6 +34,27 @@ fmt:
 doctor: build
 	./$(BINARY) doctor
 
+# Local dev against a copy of the production database. Prod stays
+# STOPPED the whole session, so the copy-back is a complete push (no
+# merging): dev's DB is prod's state at stop-time plus everything new.
+# Pass NAS_SSH on the command line, e.g. make dev-sync NAS_SSH=root@nas.
+NAS_SSH ?=
+NAS_PKG_DIR := /var/packages/wankarr/var
+
+dev:
+	go run .
+
+dev-sync:
+	@test -n "$(NAS_SSH)" || (echo "usage: make dev-sync NAS_SSH=root@<nas>"; exit 1)
+	scp $(NAS_SSH):$(NAS_PKG_DIR)/wankarr.db ./wankarr.db
+	scp $(NAS_SSH):$(NAS_PKG_DIR)/.env ./.env
+	@echo "set HTTP_PORT in ./.env to a free port (prod uses 8060)"
+
+dev-push:
+	@test -n "$(NAS_SSH)" || (echo "usage: make dev-push NAS_SSH=root@<nas>"; exit 1)
+	scp ./wankarr.db $(NAS_SSH):$(NAS_PKG_DIR)/wankarr.db
+	@echo "restart the NAS package, then verify the version in the header"
+
 run: build
 	./$(BINARY)
 

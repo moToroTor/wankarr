@@ -103,6 +103,9 @@ type OwnedScene struct {
 	// Sizes holds the byte sizes of the scene's matched files, for
 	// byte-equality rescue of title matches (sizeless files omitted).
 	Sizes []int64
+	// CoverURL rides the same snapshot query so matched groups can
+	// show XBVR artwork with no extra request.
+	CoverURL string
 }
 
 // ListWishlist returns all wishlisted scenes, following pagination.
@@ -170,7 +173,7 @@ func (c *Client) ListOwned() ([]OwnedScene, error) {
 					sizes = append(sizes, f.Size)
 				}
 			}
-			out = append(out, OwnedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, BestHeight: best, Sizes: sizes})
+			out = append(out, OwnedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, BestHeight: best, Sizes: sizes, CoverURL: s.CoverURL})
 		}
 		if len(resp.Scenes) < page {
 			break

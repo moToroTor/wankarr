@@ -138,6 +138,25 @@ Boot-up): `cd /path/to/wankarr && ./wankarr-linux-amd64 >> wankarr.log 2>&1`.
 - No cgo: SQLite via `modernc.org/sqlite`. UI is dependency-free
   vanilla JS in `web/` (embedded in the binary).
 
+### Local dev against production data (Mac)
+
+The dev instance is a scratch copy, never a second poller: it polls the
+real RSS feed while the NAS package is stopped, so glitches reproduce
+against the live firehose and nothing races for notifications.
+
+1. Stop the NAS package and keep it down until step 5.
+2. `make dev-sync NAS_SSH=root@<nas>` — pulls `wankarr.db` and `.env`.
+3. Set `HTTP_PORT` in `./.env` to a free port (prod uses 8060).
+4. `make dev`, browse `localhost:<port>`. Note Send queues REAL
+   downloads on the NAS Transmission — fine when deliberate.
+5. `make dev-push NAS_SSH=root@<nas>`, restart the package, verify the
+   version in the header.
+
+Copy-back is a complete push (no merging) only because prod was frozen;
+any prod writes after step 1 are lost. Push only onto a prod build from
+the same-or-newer commit, so a dev migration never strands the NAS
+binary on a schema it can't read.
+
 ## License
 
 GPL-3.0 (see `LICENSE.md`), matching the *arr projects. Note that XBVR

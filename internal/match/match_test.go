@@ -41,15 +41,31 @@ func TestLibraryBest(t *testing.T) {
 		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720},
 		{SceneID: "other", Title: "Completely Different Words Here", Site: "Other Site", BestHeight: 1080},
 	})
-	if h, title, ok := lib.Best("[virtual papi] sfizydyd (next door peep)", nil, 0.6); !ok || h != 720 || title != "SfizyDyd (Next Door Peep)" {
+	if h, title, _, ok := lib.Best("[virtual papi] sfizydyd (next door peep)", nil, 0.6); !ok || h != 720 || title != "SfizyDyd (Next Door Peep)" {
 		t.Errorf("best = %d, %q, %v; want 720, the scene title, true", h, title, ok)
 	}
-	if _, _, ok := lib.Best("some other scene entirely", nil, 0.6); ok {
+	if _, _, _, ok := lib.Best("some other scene entirely", nil, 0.6); ok {
 		t.Error("unrelated key matched, want false")
 	}
 	// Near-miss overlap below threshold: single shared token.
-	if _, _, ok := lib.Best("sfizydyd", nil, 0.6); ok {
+	if _, _, _, ok := lib.Best("sfizydyd", nil, 0.6); ok {
 		t.Error("below-threshold overlap matched, want false")
+	}
+}
+
+// Best also returns the snapshot row's XBVR cover (or empty when the
+// scene has none), so groups can show library artwork with no extra
+// query — including on size-rescued matches.
+func TestLibraryBestReturnsCover(t *testing.T) {
+	lib := IndexLibrary([]xbvr.OwnedScene{
+		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720, CoverURL: "https://xbvr/cover/vp-1.jpg"},
+		{SceneID: "bare", Title: "No Cover Scene Here", Site: "Other Site", BestHeight: 1080},
+	})
+	if _, _, cover, ok := lib.Best("[virtual papi] sfizydyd (next door peep)", nil, 0.6); !ok || cover != "https://xbvr/cover/vp-1.jpg" {
+		t.Errorf("cover = %q, %v; want the XBVR cover, true", cover, ok)
+	}
+	if _, _, cover, ok := lib.Best("[other site] no cover scene here", nil, 0.6); !ok || cover != "" {
+		t.Errorf("cover = %q, %v; want empty, true", cover, ok)
 	}
 }
 
@@ -60,7 +76,7 @@ func TestSingleTokenTitleNeverMatches(t *testing.T) {
 	lib := IndexLibrary([]xbvr.OwnedScene{
 		{SceneID: "x-1", Title: "Slut", Site: "Virtual Papi", BestHeight: 2880},
 	})
-	if _, _, ok := lib.Best("[virtual papi] maya rose (french little slut)", nil, 0.6); ok {
+	if _, _, _, ok := lib.Best("[virtual papi] maya rose (french little slut)", nil, 0.6); ok {
 		t.Error("single-token owned title matched, want false")
 	}
 	w := xbvr.WantedScene{SceneID: "x-1", Title: "Slut", Site: "Virtual Papi"}
@@ -81,22 +97,22 @@ func TestBestRescuesByteEqualCompilation(t *testing.T) {
 	})
 	key := emp.GroupKey("[FuckPassVR] Payton Preslee, Lily Starfire, Lauren Phillips, Skylar Snow, Lexi Luv, Sarah Arabic, Jennifer Mendez (Best Curvy Cowgirl Adventures Vol.1) [180°, 8k, 4096, Oculus Rift / Vive]")
 	// Title alone: far below the Jaccard floor.
-	if _, _, ok := lib.Best(key, nil, 0.6); ok {
+	if _, _, _, ok := lib.Best(key, nil, 0.6); ok {
 		t.Fatal("title-only match, want false")
 	}
-	h, title, ok := lib.Best(key, []int64{ownedSize}, 0.6)
+	h, title, _, ok := lib.Best(key, []int64{ownedSize}, 0.6)
 	if !ok || h != 1920 || title != "Best Curvy Cowgirl Adventures Vol.1" {
 		t.Fatalf("rescued = %d, %q, %v; want 1920, the compilation, true", h, title, ok)
 	}
 	// 1% drift still rescues; 10% does not.
-	if _, _, ok := lib.Best(key, []int64{ownedSize * 101 / 100}, 0.6); !ok {
+	if _, _, _, ok := lib.Best(key, []int64{ownedSize * 101 / 100}, 0.6); !ok {
 		t.Error("1% size drift: want rescue")
 	}
-	if _, _, ok := lib.Best(key, []int64{ownedSize * 11 / 10}, 0.6); ok {
+	if _, _, _, ok := lib.Best(key, []int64{ownedSize * 11 / 10}, 0.6); ok {
 		t.Error("10% size drift: want no rescue")
 	}
 	// Unknown sizes never rescue.
-	if _, _, ok := lib.Best(key, []int64{0}, 0.6); ok {
+	if _, _, _, ok := lib.Best(key, []int64{0}, 0.6); ok {
 		t.Error("zero variant size: want no rescue")
 	}
 }
@@ -110,7 +126,7 @@ func TestRescueNeedsPerfectRecall(t *testing.T) {
 		{SceneID: "x", Title: "Closing A Deal Remastered", Site: "SLR", BestHeight: 1024, Sizes: []int64{size}},
 	})
 	key := emp.GroupKey("SLROriginals - Earn the Deal - Melissa Stratton (2026.09.23) (Oculus 4K)")
-	if _, _, ok := lib.Best(key, []int64{size}, 0.6); ok {
+	if _, _, _, ok := lib.Best(key, []int64{size}, 0.6); ok {
 		t.Error("imperfect recall with size hit: want no rescue")
 	}
 }
@@ -124,7 +140,7 @@ func TestRescueNeverOverridesScored(t *testing.T) {
 		{SceneID: "rescue", Title: "Rainy City", Site: "Other", BestHeight: 720, Sizes: []int64{size}},
 	})
 	key := emp.GroupKey("FuckPassVR - Rainy City Rendezvous - Mia James (2026.08.28) (Oculus 8K, UHD)")
-	h, title, ok := lib.Best(key, []int64{size}, 0.6)
+	h, title, _, ok := lib.Best(key, []int64{size}, 0.6)
 	if !ok || h != 1920 || title != "Rainy City Rendezvous" {
 		t.Fatalf("got %d, %q, %v; want the scored match", h, title, ok)
 	}
@@ -167,7 +183,7 @@ func TestReportedFalsePositivesRejected(t *testing.T) {
 			t.Errorf("%s: ScoreTitle = %v, want 0", tc.name, s)
 		}
 		lib := IndexLibrary([]xbvr.OwnedScene{tc.owned})
-		if _, _, ok := lib.Best(key, nil, 0.6); ok {
+		if _, _, _, ok := lib.Best(key, nil, 0.6); ok {
 			t.Errorf("%s: index matched, want false", tc.name)
 		}
 	}

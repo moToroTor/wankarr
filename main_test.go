@@ -38,11 +38,11 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	xc := xbvr.NewClient(srv.URL)
-	got, title, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6)
+	got, title, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6)
 	if !ok || got != 720 || title != "SfizyDyd Scene" {
 		t.Fatalf("snapshot best = %d, %q, %v; want 720, SfizyDyd Scene, true", got, title, ok)
 	}
-	again, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6)
+	again, _, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6)
 	if !ok || again != 720 {
 		t.Fatalf("cached best = %d, %v; want 720, true", again, ok)
 	}
@@ -51,7 +51,7 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 	}
 	ownedCache.at = time.Time{}
 	fail = true
-	if stale, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6); !ok || stale != 720 {
+	if stale, _, _, ok := getOwned(xc).Best("[virtual papi] sfizydyd scene", nil, 0.6); !ok || stale != 720 {
 		t.Fatalf("stale best = %d, %v; want 720, true", stale, ok)
 	}
 	if calls != 2 {
@@ -61,7 +61,7 @@ func TestGetOwnedCachesAndKeepsStale(t *testing.T) {
 
 // Groups already matched in the XBVR library carry their best local
 // height; unowned groups carry none.
-func TestBuildGroupViewsMarksOwned(t *testing.T) {
+func TestEnrichGroupsMarksOwned(t *testing.T) {
 	items := []store.Item{
 		{GroupID: "a", Title: "[Virtual Papi] SfizyDyd (Next Door Peep) 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30},
 		{GroupID: "b", Title: "Some Other Scene 4K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30},
@@ -69,10 +69,11 @@ func TestBuildGroupViewsMarksOwned(t *testing.T) {
 	owned := []xbvr.OwnedScene{
 		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720},
 	}
-	views := buildGroupViews(emp.Profile{}, &config.Config{}, nil, match.IndexLibrary(owned), items, false)
+	views := clusterGroups(emp.Profile{}, items, false)
 	if len(views) != 2 {
 		t.Fatalf("views = %d, want 2", len(views))
 	}
+	enrichGroups(&config.Config{}, nil, match.IndexLibrary(owned), views)
 	for _, v := range views {
 		switch v.Key {
 		case "[virtual papi] sfizydyd (next door peep)":
@@ -89,6 +90,68 @@ func TestBuildGroupViewsMarksOwned(t *testing.T) {
 		default:
 			t.Errorf("unexpected group key %q", v.Key)
 		}
+	}
+}
+
+// Pages match only their own slice: enriching page 1 must not touch
+// later pages, so page 1 never waits for the whole index.
+func TestEnrichGroupsPageOnly(t *testing.T) {
+	items := []store.Item{
+		{GroupID: "a", Title: "[Virtual Papi] SfizyDyd (Next Door Peep) 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30},
+		{GroupID: "b", Title: "[Virtual Papi] Other Scene Here 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30},
+		{GroupID: "c", Title: "[Virtual Papi] Third Scene Here 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30},
+	}
+	owned := []xbvr.OwnedScene{
+		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720},
+		{SceneID: "vp-2", Title: "Other Scene Here", Site: "Virtual Papi", BestHeight: 1080},
+		{SceneID: "vp-3", Title: "Third Scene Here", Site: "Virtual Papi", BestHeight: 1080},
+	}
+	all := clusterGroups(emp.Profile{}, items, false)
+	page, total := pageViews(all, 1, 1)
+	if total != 3 || len(page) != 1 {
+		t.Fatalf("page = %d views of %d; want 1 of 3", len(page), total)
+	}
+	enrichGroups(&config.Config{}, nil, match.IndexLibrary(owned), page)
+	marked := 0
+	for _, v := range all {
+		if v.OwnedTitle != "" {
+			marked++
+		}
+	}
+	if marked != 1 {
+		t.Errorf("marked groups = %d; want exactly the served page", marked)
+	}
+}
+
+// Cover priority: wishlist artwork, then library artwork from the same
+// snapshot row, then the Emp poster.
+func TestEnrichGroupsCoverPriority(t *testing.T) {
+	items := []store.Item{
+		{GroupID: "a", Title: "[Virtual Papi] SfizyDyd (Next Door Peep) 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30, CoverURL: "https://emp/poster-a.jpg"},
+		{GroupID: "b", Title: "[Other Site] No Cover Scene Here 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30, CoverURL: "https://emp/poster-b.jpg"},
+		{GroupID: "c", Title: "[Third Site] Unmatched Scene Here 2K", Tags: []string{"virtual.reality"}, SizeBytes: 4 << 30, CoverURL: "https://emp/poster-c.jpg"},
+	}
+	wishlist := []xbvr.WantedScene{
+		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", CoverURL: "https://xbvr/want.jpg"},
+	}
+	owned := []xbvr.OwnedScene{
+		{SceneID: "vp-1", Title: "SfizyDyd (Next Door Peep)", Site: "Virtual Papi", BestHeight: 720, CoverURL: "https://xbvr/owned-a.jpg"},
+		{SceneID: "os-2", Title: "No Cover Scene Here", Site: "Other Site", BestHeight: 1080, CoverURL: "https://xbvr/owned-b.jpg"},
+	}
+	views := clusterGroups(emp.Profile{}, items, false)
+	enrichGroups(&config.Config{}, wishlist, match.IndexLibrary(owned), views)
+	got := map[string]string{}
+	for _, v := range views {
+		got[v.Key] = v.Cover
+	}
+	if got["[virtual papi] sfizydyd (next door peep)"] != "https://xbvr/want.jpg" {
+		t.Errorf("wanted+owned cover = %q; want the wishlist artwork", got["[virtual papi] sfizydyd (next door peep)"])
+	}
+	if got["[other site] no cover scene here"] != "https://xbvr/owned-b.jpg" {
+		t.Errorf("owned-only cover = %q; want the library artwork", got["[other site] no cover scene here"])
+	}
+	if got["[third site] unmatched scene here"] != "https://emp/poster-c.jpg" {
+		t.Errorf("unmatched cover = %q; want the Emp poster", got["[third site] unmatched scene here"])
 	}
 }
 
@@ -145,7 +208,7 @@ func TestPageViewsNewestFirst(t *testing.T) {
 
 // A Jaccard-killed group is still marked owned when a variant is
 // byte-equal to an owned file of the fully-named scene.
-func TestBuildGroupViewsRescuesByteEqual(t *testing.T) {
+func TestEnrichGroupsRescuesByteEqual(t *testing.T) {
 	const gb = int64(1) << 30
 	size := 35 * gb
 	items := []store.Item{
@@ -154,10 +217,11 @@ func TestBuildGroupViewsRescuesByteEqual(t *testing.T) {
 	owned := []xbvr.OwnedScene{
 		{SceneID: "fp-c", Title: "Best Curvy Cowgirl Adventures Vol.1", Site: "FuckPassVR", BestHeight: 1920, Sizes: []int64{size}},
 	}
-	views := buildGroupViews(emp.Profile{}, &config.Config{}, nil, match.IndexLibrary(owned), items, false)
+	views := clusterGroups(emp.Profile{}, items, false)
 	if len(views) != 1 {
 		t.Fatalf("views = %d, want 1", len(views))
 	}
+	enrichGroups(&config.Config{}, nil, match.IndexLibrary(owned), views)
 	if views[0].OwnedHeight != 1920 || views[0].OwnedTitle != "Best Curvy Cowgirl Adventures Vol.1" {
 		t.Errorf("rescued group = %d, %q; want 1920, the compilation", views[0].OwnedHeight, views[0].OwnedTitle)
 	}
