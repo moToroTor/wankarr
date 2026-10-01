@@ -287,32 +287,53 @@ func getOwned(xc *xbvr.Client) match.Library {
 	if time.Since(ownedCache.at) < ownedCacheTTL {
 		return ownedCache.lib
 	}
+	start := time.Now()
 	list, err := xc.ListOwned()
 	if err != nil {
 		log.Printf("library snapshot unavailable: %v", err)
 		return ownedCache.lib
 	}
 	ownedCache.at, ownedCache.lib = time.Now(), match.IndexLibrary(list)
+	log.Printf("owned: refreshed %d scenes in %s", len(list), time.Since(start).Round(time.Millisecond))
 	return ownedCache.lib
 }
 
+// logStage logs the start of a request phase and returns a stop func
+// that logs its elapsed time, so slow pages can be attributed from
+// the log instead of guessed at.
+func logStage(r *http.Request, name string) func() {
+	start := time.Now()
+	log.Printf("%s %s: start", r.URL.Path, name)
+	return func() {
+		log.Printf("%s %s: done in %s", r.URL.Path, name, time.Since(start).Round(time.Millisecond))
+	}
+}
+
 func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.ResponseWriter, r *http.Request) {
+	done := logStage(r, "request")
+	defer done()
+	stop := logStage(r, "store")
 	items, err := db.Get(500)
+	stop()
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
 	// Wishlist and library enrichment is best-effort: XBVR down means
 	// no wanted/owned flags, never a failed page.
+	stop = logStage(r, "wishlist")
 	var wishlist []xbvr.WantedScene
 	if ws, err := xc.ListWishlist(); err == nil {
 		wishlist = ws
 	} else {
 		log.Printf("groups: wishlist unavailable: %v", err)
 	}
+	stop()
 	// The library snapshot is cached (getOwned): re-paging all of XBVR
 	// on every view is what made Groups crawl on big libraries.
+	stop = logStage(r, "owned")
 	owned := getOwned(xc)
+	stop()
 	vrOnly := r.URL.Query().Get("vr") != "0"
 	q := r.URL.Query().Get("q")
 	items = filterQuery(items, q)
@@ -322,8 +343,12 @@ func serveGroups(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Respo
 	}
 	// Cluster and page the whole index, but match only the visible
 	// slice: page 1 never waits for every group to match.
+	stop = logStage(r, "cluster")
 	views, total := pageViews(clusterGroups(emp.Profile{}, items, vrOnly), page, groupsPerPage)
+	stop()
+	stop = logStage(r, "enrich")
 	enrichGroups(cfg, wishlist, owned, views)
+	stop()
 	writeJSON(w, groupsPage{Groups: views, Total: total, Page: page, PerPage: groupsPerPage})
 }
 
