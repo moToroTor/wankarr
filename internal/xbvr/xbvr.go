@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,11 +23,105 @@ import (
 type Client struct {
 	baseURL string
 	http    *http.Client
+	// httpLong serves the synchronous scrape-pick call, which runs one
+	// search plus one page fetch server-side (~30s).
+	httpLong *http.Client
 }
 
 // NewClient returns a client for baseURL like http://127.0.0.1:9999.
 func NewClient(baseURL string) *Client {
-	return &Client{baseURL: baseURL, http: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{baseURL: baseURL, http: &http.Client{Timeout: 30 * time.Second}, httpLong: &http.Client{Timeout: 90 * time.Second}}
+}
+
+// ScrapeCandidate is one ranked scrape target: enough for a human to
+// say "this is the best one".
+type ScrapeCandidate struct {
+	ScraperID   string `json:"scraper_id"`
+	ScraperName string `json:"scraper_name"`
+	Domain      string `json:"domain"`
+	URL         string `json:"url"`
+	Title       string `json:"title"`
+	Reason      string `json:"reason"`
+	Preferred   bool   `json:"preferred"`
+}
+
+// ScrapePickResult is the scrape-pick outcome. SceneID 0 means nothing
+// found or the page yielded no scene — the caller falls back to the
+// scrape-search samples.
+type ScrapePickResult struct {
+	Status     string          `json:"status"`
+	SceneID    uint            `json:"scene_id"`
+	Wishlisted bool            `json:"wishlisted"`
+	Candidate  ScrapeCandidate `json:"candidate"`
+}
+
+// SearchScenes returns XBVR scenes matching a title query.
+func (c *Client) SearchScenes(q string) ([]Scene, error) {
+	var resp struct {
+		Scenes []Scene `json:"scenes"`
+	}
+	if err := c.getJSON("/api/scene/search?q="+url.QueryEscape(q), &resp); err != nil {
+		return nil, err
+	}
+	return resp.Scenes, nil
+}
+
+// GetScene reads one scene by numeric id (wishlist flag, availability).
+func (c *Client) GetScene(id uint) (Scene, error) {
+	var s Scene
+	if err := c.getJSON("/api/scene/"+strconv.FormatUint(uint64(id), 10), &s); err != nil {
+		return Scene{}, err
+	}
+	return s, nil
+}
+
+// ScrapeSearch returns ranked scrape candidates for a query string.
+// Read-only: nothing is scraped or stored.
+func (c *Client) ScrapeSearch(q string) ([]ScrapeCandidate, error) {
+	body, _ := json.Marshal(map[string]any{"q": q})
+	var resp struct {
+		Status     string            `json:"status"`
+		Candidates []ScrapeCandidate `json:"candidates"`
+	}
+	if err := c.post("/api/task/scrape-search", body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Status != "OK" {
+		return nil, fmt.Errorf("xbvr scrape-search: status %q", resp.Status)
+	}
+	return resp.Candidates, nil
+}
+
+// ScrapePick scrapes one candidate (or the ranked best when scraperID
+// and url are empty) and optionally wishlists the persisted scene.
+// Trust the returned Wishlisted flag over an immediate re-read: the
+// write is durable before the response, but a fresh GET in the same
+// tick can still serve the pre-write value.
+func (c *Client) ScrapePick(title, site string, performers []string, scraperID, url string, wishlist bool) (ScrapePickResult, error) {
+	if performers == nil {
+		performers = []string{}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"title": title, "site": site, "performers": performers,
+		"scraper_id": scraperID, "url": url, "wishlist": wishlist,
+	})
+	var res ScrapePickResult
+	if err := c.postLong("/api/task/scrape-pick", body, &res); err != nil {
+		return ScrapePickResult{}, err
+	}
+	if res.Status != "OK" {
+		return ScrapePickResult{}, fmt.Errorf("xbvr scrape-pick: status %q", res.Status)
+	}
+	return res, nil
+}
+
+// ToggleWishlist flips a scene's wishlist flag. It is a TOGGLE: read
+// the scene first and call only when Wishlist is false — and never on
+// library scenes (the server refuses those).
+func (c *Client) ToggleWishlist(sceneID string) error {
+	body, _ := json.Marshal(map[string]any{"scene_id": sceneID, "list": "wishlist"})
+	var dst any
+	return c.post("/api/scene/toggle", body, &dst)
 }
 
 // File mirrors the XBVR file fields Wankarr needs for quality comparison
@@ -143,43 +240,114 @@ func (c *Client) ListWishlist() ([]WantedScene, error) {
 	return out, nil
 }
 
+// ownedPageSize matches the previous sequential paging.
+// ownedFetchWorkers bounds concurrent page fetches: XBVR answers each
+// page with a file-joining query, so unbounded parallelism would just
+// move the queue onto XBVR.
+const ownedPageSize = 200
+
+const ownedFetchWorkers = 4
+
 // ListOwned returns available scenes with their best local file height.
+// Offset 0 fetches first: small libraries finish in one round trip,
+// exactly as before. A full first page fans out for the remaining
+// offsets, merging in offset order so large libraries don't pay a full
+// round trip per page. A short or empty page ends the scan; any page
+// error fails the whole snapshot (the caller serves stale instead).
 func (c *Client) ListOwned() ([]OwnedScene, error) {
-	var out []OwnedScene
-	const page = 200
-	for offset := 0; ; offset += page {
-		body, _ := json.Marshal(map[string]any{
-			"isAvailable": true,
-			"limit":       page,
-			"offset":      offset,
-		})
-		var resp struct {
-			Scenes []Scene `json:"scenes"`
-		}
-		if err := c.post("/api/scene/list", body, &resp); err != nil {
-			return nil, err
-		}
-		if len(resp.Scenes) == 0 {
-			break
-		}
-		for _, s := range resp.Scenes {
-			best := 0
-			var sizes []int64
-			for _, f := range s.Files {
-				if f.VideoHeight > best {
-					best = f.VideoHeight
-				}
-				if f.Size > 0 {
-					sizes = append(sizes, f.Size)
-				}
+	first, err := c.fetchOwnedPage(0)
+	if err != nil {
+		return nil, err
+	}
+	if len(first) < ownedPageSize {
+		return mapOwnedScenes(first), nil
+	}
+	var mu sync.Mutex
+	next := ownedPageSize
+	stopped := false
+	pages := map[int][]Scene{0: first}
+	var firstErr error
+	var wg sync.WaitGroup
+	worker := func() {
+		defer wg.Done()
+		for {
+			mu.Lock()
+			if stopped || firstErr != nil {
+				mu.Unlock()
+				return
 			}
-			out = append(out, OwnedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, BestHeight: best, Sizes: sizes, CoverURL: s.CoverURL})
-		}
-		if len(resp.Scenes) < page {
-			break
+			offset := next
+			next += ownedPageSize
+			mu.Unlock()
+			scenes, err := c.fetchOwnedPage(offset)
+			mu.Lock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			pages[offset] = scenes
+			if len(scenes) < ownedPageSize {
+				stopped = true
+			}
+			mu.Unlock()
 		}
 	}
+	wg.Add(ownedFetchWorkers)
+	for i := 0; i < ownedFetchWorkers; i++ {
+		go worker()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	var offsets []int
+	for offset := range pages {
+		offsets = append(offsets, offset)
+	}
+	sort.Ints(offsets)
+	var out []OwnedScene
+	for _, offset := range offsets {
+		out = append(out, mapOwnedScenes(pages[offset])...)
+	}
 	return out, nil
+}
+
+// mapOwnedScenes reduces raw scenes to the owned fields Wankarr keeps.
+func mapOwnedScenes(scenes []Scene) []OwnedScene {
+	var out []OwnedScene
+	for _, s := range scenes {
+		best := 0
+		var sizes []int64
+		for _, f := range s.Files {
+			if f.VideoHeight > best {
+				best = f.VideoHeight
+			}
+			if f.Size > 0 {
+				sizes = append(sizes, f.Size)
+			}
+		}
+		out = append(out, OwnedScene{SceneID: s.SceneID, Title: s.Title, Site: s.Site, BestHeight: best, Sizes: sizes, CoverURL: s.CoverURL})
+	}
+	return out
+}
+
+// fetchOwnedPage returns one raw library page at the given offset.
+func (c *Client) fetchOwnedPage(offset int) ([]Scene, error) {
+	body, _ := json.Marshal(map[string]any{
+		"isAvailable": true,
+		"limit":       ownedPageSize,
+		"offset":      offset,
+	})
+	var resp struct {
+		Scenes []Scene `json:"scenes"`
+	}
+	if err := c.post("/api/scene/list", body, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Scenes, nil
 }
 
 // Rescan triggers XBVR's library rescan (async server-side): new files
@@ -256,12 +424,22 @@ func (c *Client) get(path string) error {
 }
 
 func (c *Client) post(path string, body []byte, dst any) error {
+	return c.doPost(c.http, path, body, dst)
+}
+
+// postLong is post over the long-timeout client, for synchronous calls
+// that run a search plus a page fetch server-side.
+func (c *Client) postLong(path string, body []byte, dst any) error {
+	return c.doPost(c.httpLong, path, body, dst)
+}
+
+func (c *Client) doPost(hc *http.Client, path string, body []byte, dst any) error {
 	req, err := http.NewRequest(http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := c.http.Do(req)
+	res, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("xbvr POST %s: %w", path, err)
 	}
@@ -275,6 +453,29 @@ func (c *Client) post(path string, body []byte, dst any) error {
 	}
 	if err := json.Unmarshal(raw, dst); err != nil {
 		return fmt.Errorf("xbvr POST %s: decode: %w", path, err)
+	}
+	return nil
+}
+
+func (c *Client) getJSON(path string, dst any) error {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("xbvr GET %s: %w", path, err)
+	}
+	defer res.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 32<<20))
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("xbvr GET %s: status %d", path, res.StatusCode)
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		return fmt.Errorf("xbvr GET %s: decode: %w", path, err)
 	}
 	return nil
 }

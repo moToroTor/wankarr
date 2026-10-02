@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,6 +79,16 @@ func main() {
 		}
 	}()
 
+	// Library snapshot warmer: the first fill happens here instead of
+	// inside someone's page load, and the ticker refreshes ahead of the
+	// TTL so Groups requests keep hitting a warm cache.
+	go func() {
+		getOwned(xc)
+		for range time.Tick(ownedRefreshInterval) {
+			getOwned(xc)
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok items=%d\n", mustCount(db))
@@ -101,6 +112,12 @@ func main() {
 	})
 	mux.HandleFunc("/api/wishlist", func(w http.ResponseWriter, r *http.Request) {
 		serveWishlist(db, cfg, xc, w, r)
+	})
+	mux.HandleFunc("/api/wishlist/add", func(w http.ResponseWriter, r *http.Request) {
+		serveWishlistAdd(xc, w, r)
+	})
+	mux.HandleFunc("/api/wishlist/pick", func(w http.ResponseWriter, r *http.Request) {
+		serveWishlistPick(xc, w, r)
 	})
 	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
 		serveVersion(w, r)
@@ -270,6 +287,11 @@ type groupView struct {
 // keeps every Groups view from re-paging all of XBVR, which crawls on
 // big libraries (every Find-versions search reloads the view).
 const ownedCacheTTL = 5 * time.Minute
+
+// ownedRefreshInterval re-warms the library snapshot ahead of its TTL:
+// after the first fill, page requests (almost) always hit a warm cache
+// instead of paying a full XBVR re-page inside someone's page load.
+const ownedRefreshInterval = 4 * time.Minute
 
 var ownedCache struct {
 	sync.Mutex
@@ -885,6 +907,144 @@ func serveWishlist(db *store.DB, cfg *config.Config, xc *xbvr.Client, w http.Res
 		out = append(out, wv)
 	}
 	writeJSON(w, out)
+}
+
+// leadingBracketRe splits the uploader tag ("[vrdome / sexlikereal]")
+// off an Emp group key; dateParenRe drops the scene-date parenthetical
+// (grouping identity, not search material). Mirrors the Find-versions
+// query stripping in web/app.js.
+var leadingBracketRe = regexp.MustCompile(`^\[([^\]]+)\]`)
+
+var dateParenRe = regexp.MustCompile(`\(\d{4}[.\-/]\d{2}[.\-/]\d{2}\)`)
+
+var nonAlnumRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// splitSiteTitle derives XBVR search material from an Emp group key:
+// the uploader tag becomes the site and the date drops out.
+// Performers are unknown Emp-side; the wishlist flow sends none.
+func splitSiteTitle(key string) (site, title string) {
+	rest := strings.TrimSpace(key)
+	if m := leadingBracketRe.FindStringSubmatch(rest); m != nil {
+		site = strings.TrimSpace(m[1])
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, m[0]))
+	}
+	rest = dateParenRe.ReplaceAllString(rest, "")
+	return site, strings.Join(strings.Fields(rest), " ")
+}
+
+// normTitle folds a title for hit comparison: case and punctuation
+// carry no identity across Emp and XBVR spellings.
+func normTitle(s string) string {
+	return nonAlnumRe.ReplaceAllString(strings.ToLower(s), "")
+}
+
+type wishlistResult struct {
+	Status     string                 `json:"status"`
+	SceneID    uint                   `json:"scene_id,omitempty"`
+	Candidates []xbvr.ScrapeCandidate `json:"candidates,omitempty"`
+}
+
+// serveWishlistAdd runs the wishlist-this flow for one Emp group key:
+// XBVR search → toggle on an unwishlisted hit, else trust-pick scrape,
+// else the scrape-search samples for a manual pick.
+func serveWishlistAdd(xc *xbvr.Client, w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		GroupKey string `json:"group_key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || strings.TrimSpace(req.GroupKey) == "" {
+		http.Error(w, "missing group_key", http.StatusBadRequest)
+		return
+	}
+	writeWishlistResult(xc, w, req.GroupKey, "", "")
+}
+
+// serveWishlistPick completes the flow with a user-picked candidate
+// from the samples list.
+func serveWishlistPick(xc *xbvr.Client, w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		GroupKey  string `json:"group_key"`
+		ScraperID string `json:"scraper_id"`
+		URL       string `json:"url"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil ||
+		strings.TrimSpace(req.GroupKey) == "" || req.ScraperID == "" || req.URL == "" {
+		http.Error(w, "missing group_key/scraper_id/url", http.StatusBadRequest)
+		return
+	}
+	writeWishlistResult(xc, w, req.GroupKey, req.ScraperID, req.URL)
+}
+
+func writeWishlistResult(xc *xbvr.Client, w http.ResponseWriter, key, scraperID, url string) {
+	site, title := splitSiteTitle(key)
+	if title == "" {
+		http.Error(w, "unreadable group key", http.StatusBadRequest)
+		return
+	}
+	explicit := scraperID != "" && url != ""
+	if !explicit {
+		// A search miss (or a search endpoint that errors) falls
+		// through to the trust pick; only the pick decides.
+		if hits, err := xc.SearchScenes(title); err != nil {
+			log.Printf("wishlist add %q: search: %v", title, err)
+		} else {
+			for _, h := range hits {
+				if normTitle(h.Title) != normTitle(title) {
+					continue
+				}
+				s, err := xc.GetScene(h.ID)
+				if err != nil {
+					log.Printf("wishlist add %q: read scene %d: %v", title, h.ID, err)
+					http.Error(w, "xbvr read failed", http.StatusBadGateway)
+					return
+				}
+				switch {
+				case s.IsAvailable:
+					writeJSON(w, wishlistResult{Status: "owned", SceneID: s.ID})
+					return
+				case s.Wishlist:
+					writeJSON(w, wishlistResult{Status: "wishlisted", SceneID: s.ID})
+					return
+				default:
+					if err := xc.ToggleWishlist(s.SceneID); err != nil {
+						log.Printf("wishlist add %q: toggle: %v", title, err)
+						http.Error(w, "xbvr wishlist failed", http.StatusBadGateway)
+						return
+					}
+					writeJSON(w, wishlistResult{Status: "wishlisted", SceneID: s.ID})
+					return
+				}
+			}
+		}
+	}
+	res, err := xc.ScrapePick(title, site, nil, scraperID, url, true)
+	if err != nil {
+		// An XBVR without the scrape-pick endpoint answers 404: report
+		// it as a state, not a failure.
+		if strings.Contains(err.Error(), "status 404") {
+			writeJSON(w, wishlistResult{Status: "unsupported"})
+			return
+		}
+		log.Printf("wishlist add %q: scrape-pick: %v", title, err)
+		http.Error(w, "xbvr scrape failed", http.StatusBadGateway)
+		return
+	}
+	// Trust the pick response over an immediate re-read: the write is
+	// durable first, but a same-tick GET can serve the pre-write value.
+	if res.SceneID != 0 {
+		writeJSON(w, wishlistResult{Status: "wishlisted", SceneID: res.SceneID})
+		return
+	}
+	if explicit {
+		writeJSON(w, wishlistResult{Status: "unknown"})
+		return
+	}
+	q := strings.TrimSpace(site + " " + title)
+	cands, err := xc.ScrapeSearch(q)
+	if err != nil || len(cands) == 0 {
+		writeJSON(w, wishlistResult{Status: "unknown"})
+		return
+	}
+	writeJSON(w, wishlistResult{Status: "samples", Candidates: cands})
 }
 
 func serveMatches(db *store.DB, w http.ResponseWriter, r *http.Request) {

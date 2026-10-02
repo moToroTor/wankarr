@@ -227,6 +227,178 @@ func TestEnrichGroupsRescuesByteEqual(t *testing.T) {
 	}
 }
 
+func TestSplitSiteTitle(t *testing.T) {
+	cases := []struct{ key, site, title string }{
+		{"[vrdome / sexlikereal] francii luscious - first titty drop (2026-05-22)", "vrdome / sexlikereal", "francii luscious - first titty drop"},
+		{"fuckpassvr - rainy city rendezvous - mia james (2026.08.28)", "", "fuckpassvr - rainy city rendezvous - mia james"},
+		{"[virtual papi] sfizydyd (next door peep)", "virtual papi", "sfizydyd (next door peep)"},
+	}
+	for _, tc := range cases {
+		if site, title := splitSiteTitle(tc.key); site != tc.site || title != tc.title {
+			t.Errorf("splitSiteTitle(%q) = %q, %q; want %q, %q", tc.key, site, title, tc.site, tc.title)
+		}
+	}
+}
+
+// wishlistFlowStub speaks the XBVR wishlist flow and counts toggles and
+// searches, so tests can assert which path ran.
+type wishlistFlowStub struct {
+	t            *testing.T
+	searchCalls  int
+	toggleCalls  int
+	pickScraper  string
+	pickURL      string
+	pickEndpoint bool
+}
+
+func (s *wishlistFlowStub) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		enc := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+		switch {
+		case r.URL.Path == "/api/scene/search":
+			s.searchCalls++
+			q := r.URL.Query().Get("q")
+			scenes := []map[string]any{}
+			switch q {
+			case "first titty drop":
+				scenes = []map[string]any{{"id": 7, "scene_id": "slr-1", "title": "First Titty Drop", "site": "SexLikeReal"}}
+			case "already wanted":
+				scenes = []map[string]any{{"id": 8, "scene_id": "aw-8", "title": "Already Wanted", "site": "Site"}}
+			case "owned scene":
+				scenes = []map[string]any{{"id": 9, "scene_id": "os-9", "title": "Owned Scene", "site": "Site"}}
+			}
+			enc(map[string]any{"scenes": scenes})
+		case r.URL.Path == "/api/scene/7":
+			enc(map[string]any{"id": 7, "scene_id": "slr-1", "title": "First Titty Drop", "wishlist": false, "is_available": false})
+		case r.URL.Path == "/api/scene/8":
+			enc(map[string]any{"id": 8, "scene_id": "aw-8", "title": "Already Wanted", "wishlist": true, "is_available": false})
+		case r.URL.Path == "/api/scene/9":
+			enc(map[string]any{"id": 9, "scene_id": "os-9", "title": "Owned Scene", "wishlist": false, "is_available": true})
+		case r.URL.Path == "/api/scene/toggle":
+			s.toggleCalls++
+			enc(map[string]any{"status": "OK"})
+		case r.URL.Path == "/api/task/scrape-pick":
+			var req map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			title, _ := req["title"].(string)
+			s.pickScraper, _ = req["scraper_id"].(string)
+			s.pickURL, _ = req["url"].(string)
+			if !s.pickEndpoint {
+				http.NotFound(w, r)
+				return
+			}
+			if title == "unknown scene here" && s.pickScraper == "" {
+				enc(map[string]any{"status": "OK", "scene_id": 0, "wishlisted": false})
+				return
+			}
+			enc(map[string]any{"status": "OK", "scene_id": 5, "wishlisted": true})
+		case r.URL.Path == "/api/task/scrape-search":
+			enc(map[string]any{"status": "OK", "candidates": []map[string]any{
+				{"scraper_id": "slr", "scraper_name": "SexLikeReal", "url": "https://sexlikereal.com/s/1", "title": "First Titty Drop", "reason": "exact", "preferred": true},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func wishlistAdd(t *testing.T, stub *wishlistFlowStub, body string) wishlistResult {
+	t.Helper()
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	rec := httptest.NewRecorder()
+	serveWishlistAdd(xbvr.NewClient(srv.URL), rec, httptest.NewRequest(http.MethodPost, "/api/wishlist/add", strings.NewReader(body)))
+	var res wishlistResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v (status %d)", err, rec.Code)
+	}
+	return res
+}
+
+func TestWishlistAddTogglesHit(t *testing.T) {
+	stub := &wishlistFlowStub{t: t, pickEndpoint: true}
+	res := wishlistAdd(t, stub, `{"group_key":"[sexlikereal] first titty drop (2026-05-22)"}`)
+	if res.Status != "wishlisted" || res.SceneID != 7 {
+		t.Errorf("result = %+v, want wishlisted scene 7", res)
+	}
+	if stub.toggleCalls != 1 {
+		t.Errorf("toggles = %d, want 1", stub.toggleCalls)
+	}
+}
+
+func TestWishlistAddSkipsToggleWhenAlreadyWanted(t *testing.T) {
+	stub := &wishlistFlowStub{t: t, pickEndpoint: true}
+	res := wishlistAdd(t, stub, `{"group_key":"[site] already wanted (2026-05-22)"}`)
+	if res.Status != "wishlisted" || res.SceneID != 8 {
+		t.Errorf("result = %+v, want wishlisted scene 8", res)
+	}
+	if stub.toggleCalls != 0 {
+		t.Errorf("toggles = %d, want 0 (already wishlisted)", stub.toggleCalls)
+	}
+}
+
+func TestWishlistAddReportsOwned(t *testing.T) {
+	stub := &wishlistFlowStub{t: t, pickEndpoint: true}
+	res := wishlistAdd(t, stub, `{"group_key":"[site] owned scene (2026-05-22)"}`)
+	if res.Status != "owned" || res.SceneID != 9 {
+		t.Errorf("result = %+v, want owned scene 9", res)
+	}
+	if stub.toggleCalls != 0 {
+		t.Errorf("toggles = %d, want 0 (library scenes are refused)", stub.toggleCalls)
+	}
+}
+
+func TestWishlistAddTrustPicksMiss(t *testing.T) {
+	stub := &wishlistFlowStub{t: t, pickEndpoint: true}
+	res := wishlistAdd(t, stub, `{"group_key":"[vrdome] fresh scene here (2026-05-22)"}`)
+	if res.Status != "wishlisted" || res.SceneID != 5 {
+		t.Errorf("result = %+v, want wishlisted scene 5 from the trust pick", res)
+	}
+	if stub.toggleCalls != 0 {
+		t.Errorf("toggles = %d, want 0 (no search hit)", stub.toggleCalls)
+	}
+}
+
+func TestWishlistAddFallsBackToSamples(t *testing.T) {
+	stub := &wishlistFlowStub{t: t, pickEndpoint: true}
+	res := wishlistAdd(t, stub, `{"group_key":"[vrdome] unknown scene here (2026-05-22)"}`)
+	if res.Status != "samples" || len(res.Candidates) != 1 || res.Candidates[0].ScraperName != "SexLikeReal" {
+		t.Errorf("result = %+v, want the samples list", res)
+	}
+}
+
+func TestWishlistAddReportsUnsupported(t *testing.T) {
+	stub := &wishlistFlowStub{t: t, pickEndpoint: false}
+	res := wishlistAdd(t, stub, `{"group_key":"[vrdome] fresh scene here (2026-05-22)"}`)
+	if res.Status != "unsupported" {
+		t.Errorf("result = %+v, want unsupported (no scrape-pick endpoint)", res)
+	}
+}
+
+func TestWishlistPickUsesExplicitCandidate(t *testing.T) {
+	stub := &wishlistFlowStub{t: t, pickEndpoint: true}
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/wishlist/pick",
+		strings.NewReader(`{"group_key":"[vrdome] unknown scene here (2026-05-22)","scraper_id":"slr","url":"https://sexlikereal.com/s/1"}`))
+	serveWishlistPick(xbvr.NewClient(srv.URL), rec, req)
+	var res wishlistResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Explicit picks skip the search and carry the chosen candidate.
+	if stub.searchCalls != 0 {
+		t.Errorf("searches = %d, want 0 (explicit pick)", stub.searchCalls)
+	}
+	if stub.pickScraper != "slr" || stub.pickURL != "https://sexlikereal.com/s/1" {
+		t.Errorf("pick carried %q %q, want the chosen candidate", stub.pickScraper, stub.pickURL)
+	}
+	if res.Status != "wishlisted" || res.SceneID != 5 {
+		t.Errorf("result = %+v, want wishlisted scene 5", res)
+	}
+}
+
 func TestFilterQuery(t *testing.T) {
 	items := []store.Item{
 		{GroupID: "1", Title: "FuckPassVR - Rainy City Rendezvous - Mia James (Oculus 8K)", Tags: []string{"mia.james", "virtual.reality"}},

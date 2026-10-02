@@ -65,6 +65,10 @@ document.addEventListener('click', (e) => {
   if (btn) sendTorrent(btn.dataset.send, btn);
   const sbtn = e.target.closest('[data-search-query]');
   if (sbtn) filterCache(sbtn.dataset.searchQuery);
+  const wbtn = e.target.closest('[data-wishlist-key]');
+  if (wbtn) wishlistAdd(wbtn.dataset.wishlistKey, wbtn);
+  const pbtn = e.target.closest('[data-wishlist-pick]');
+  if (pbtn) wishlistPick(pbtn.dataset.wlKey, pbtn.dataset.wlScraper, pbtn.dataset.wlUrl, pbtn);
 });
 
 // Scene dates are grouping identity, and the leading uploader tag
@@ -90,6 +94,7 @@ function groupCard(g) {
   return `<article class="group">
     <div class="group-head">${cover}<div><h2>${esc(g.title)}</h2>${wanted}${owned}
     <button data-search-query="${esc(searchQuery(g.key))}" title="Show cached versions of this scene">Find versions</button>
+    ${wishlistButton(g)}<div class="wishlist-box"></div>
     </div></div>
     <table><thead><tr><th>Variant</th><th>Size</th><th>Published</th><th>Note</th><th></th></tr></thead>
     <tbody>${g.variants.map(variantRow).join('')}</tbody></table>
@@ -264,6 +269,99 @@ async function liveRefresh(query, btn) {
   } catch (e) {
     setStatus(`Search error: ${e.message}`);
     if (btn) btn.disabled = false;
+  }
+}
+
+// Groups already matched to the wishlist show no button; everything
+// else offers the one-click scrape-and-wishlist.
+function wishlistButton(g) {
+  if (g.wanted_scene) {
+    return '<button disabled title="Already on the XBVR wishlist">Wishlisted ✓</button>';
+  }
+  return `<button data-wishlist-key="${esc(g.key)}" title="Scrape into XBVR and wishlist it">＋ Wishlist</button>`;
+}
+
+async function wishlistAdd(key, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Scraping XBVR…';
+  setStatus(`Wishlisting from Emp… (XBVR search, then a ~30s scrape when needed)`);
+  try {
+    const r = await fetchJSON('/api/wishlist/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_key: key }),
+    });
+    handleWishlistResult(key, r, btn);
+  } catch (e) {
+    setStatus(`Wishlist error: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = '＋ Wishlist';
+  }
+}
+
+async function wishlistPick(key, scraperID, url, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Scraping…';
+  try {
+    const r = await fetchJSON('/api/wishlist/pick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_key: key, scraper_id: scraperID, url }),
+    });
+    handleWishlistResult(key, r, btn);
+  } catch (e) {
+    setStatus(`Wishlist error: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Pick this';
+  }
+}
+
+function handleWishlistResult(key, r, btn) {
+  const card = btn.closest('.group');
+  const box = card ? card.querySelector('.wishlist-box') : null;
+  const main = card ? card.querySelector('[data-wishlist-key]') : null;
+  const done = (label) => {
+    if (main) { main.disabled = true; main.textContent = label; }
+    else { btn.disabled = true; btn.textContent = label; }
+    if (box) box.innerHTML = '';
+  };
+  switch (r.status) {
+    case 'wishlisted':
+      setStatus(`Wishlisted in XBVR (scene ${r.scene_id}).`);
+      done('Wishlisted ✓');
+      break;
+    case 'owned':
+      setStatus('Already in the XBVR library — wishlist refused.');
+      done('In library');
+      break;
+    case 'unknown':
+      setStatus(`XBVR doesn't know this title yet.`);
+      if (box) box.innerHTML = '';
+      btn.disabled = false;
+      btn.textContent = btn.hasAttribute('data-wishlist-pick') ? 'Pick this' : '＋ Wishlist';
+      break;
+    case 'unsupported':
+      setStatus('XBVR needs the scrape-pick update before wishlisting works.');
+      btn.disabled = false;
+      btn.textContent = '＋ Wishlist';
+      if (box) box.innerHTML = '';
+      break;
+    case 'samples':
+      setStatus('Pick the right scrape — or wait for a better match.');
+      if (box) {
+        box.innerHTML = (r.candidates || []).map((c) => `<div class="sample">
+          <div><strong>${esc(c.title)}</strong> <span class="src">${esc(c.scraper_name || '')}</span></div>
+          ${c.reason ? `<div>${esc(c.reason)}</div>` : ''}
+          <button data-wishlist-pick data-wl-key="${esc(key)}" data-wl-scraper="${esc(c.scraper_id)}" data-wl-url="${esc(c.url)}" title="Scrape this candidate and wishlist it">Pick this</button>
+        </div>`).join('');
+      }
+      btn.disabled = false;
+      btn.textContent = '＋ Wishlist';
+      break;
+    default:
+      setStatus(`Wishlist error: unexpected status ${esc(r.status)}`);
+      btn.disabled = false;
+      btn.textContent = '＋ Wishlist';
   }
 }
 

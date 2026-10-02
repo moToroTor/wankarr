@@ -2,13 +2,17 @@ package xbvr
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 func stubServer(t *testing.T) (*Client, *[]map[string]any) {
 	t.Helper()
+	var mu sync.Mutex
 	var seen []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/scene/list" || r.Method != http.MethodPost {
@@ -19,7 +23,9 @@ func stubServer(t *testing.T) (*Client, *[]map[string]any) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
+		mu.Lock()
 		seen = append(seen, req)
+		mu.Unlock()
 		offset := int(req["offset"].(float64))
 		var scenes []Scene
 		if offset == 0 {
@@ -73,6 +79,186 @@ func TestListOwnedCollectsSizes(t *testing.T) {
 	}
 	if len(got) != 1 || len(got[0].Sizes) != 1 || got[0].Sizes[0] != 35<<30 {
 		t.Fatalf("owned sizes = %+v", got)
+	}
+}
+
+// pagedStub serves total scenes in limit-sized chunks by offset,
+// delaying the second page so completion order differs from offset
+// order.
+func pagedStub(t *testing.T, total int, fail bool) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if fail {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		offset := int(req["offset"].(float64))
+		limit := int(req["limit"].(float64))
+		if offset == ownedPageSize {
+			time.Sleep(100 * time.Millisecond)
+		}
+		var scenes []Scene
+		for i := offset; i < offset+limit && i < total; i++ {
+			scenes = append(scenes, Scene{
+				SceneID:  fmt.Sprintf("scene-%04d", i),
+				Title:    fmt.Sprintf("Scene %04d Here", i),
+				Site:     "Site",
+				CoverURL: fmt.Sprintf("https://xbvr/cover/%04d.jpg", i),
+				Files:    []File{{VideoHeight: 1080}},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"scenes": scenes})
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(srv.URL)
+}
+
+// Concurrent pages merge in offset order (tie-breaking in the library
+// index depends on it), complete, and carry covers — even though the
+// second page finishes last here.
+func TestListOwnedMergesPagesInOrder(t *testing.T) {
+	got, err := pagedStub(t, 450, false).ListOwned()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 450 {
+		t.Fatalf("scenes = %d, want 450", len(got))
+	}
+	for i, s := range got {
+		if want := fmt.Sprintf("scene-%04d", i); s.SceneID != want {
+			t.Fatalf("scene %d = %q, want %q (order broke)", i, s.SceneID, want)
+		}
+	}
+	if got[0].CoverURL != "https://xbvr/cover/0000.jpg" {
+		t.Errorf("cover = %q, want the snapshot artwork", got[0].CoverURL)
+	}
+}
+
+// Any page error fails the snapshot; the caller serves stale instead.
+func TestListOwnedSurfacesError(t *testing.T) {
+	if _, err := pagedStub(t, 450, true).ListOwned(); err == nil {
+		t.Error("expected an error, got nil")
+	}
+}
+
+// wishlistStub speaks the scrape/wishlist flow: scene search, one
+// scene read, candidate search, trust pick, and the wishlist toggle.
+// Request shapes are asserted; t.Errorf only (handlers run off-test).
+func wishlistStub(t *testing.T) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		enc := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+		switch r.URL.Path {
+		case "/api/scene/search":
+			if q := r.URL.Query().Get("q"); q != "francii luscious" {
+				t.Errorf("search q = %q, want the title query", q)
+			}
+			enc(map[string]any{"scenes": []Scene{{ID: 7, SceneID: "slr-1", Title: "First Titty Drop", Site: "SexLikeReal"}}})
+		case "/api/scene/7":
+			enc(Scene{ID: 7, SceneID: "slr-1", Title: "First Titty Drop", Wishlist: false})
+		case "/api/task/scrape-search":
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode scrape-search: %v", err)
+			}
+			if req["q"] != "sexlikereal first titty drop" {
+				t.Errorf("scrape-search q = %v", req["q"])
+			}
+			enc(map[string]any{"status": "OK", "candidates": []ScrapeCandidate{
+				{ScraperID: "slr", ScraperName: "SexLikeReal", Domain: "sexlikereal.com", URL: "https://sexlikereal.com/s/1", Title: "First Titty Drop", Reason: "exact", Preferred: true},
+			}})
+		case "/api/task/scrape-pick":
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode scrape-pick: %v", err)
+			}
+			title, _ := req["title"].(string)
+			if (title != "First Titty Drop" && title != "Unknown Scene Here") || req["wishlist"] != true {
+				t.Errorf("scrape-pick body = %v, want title/wishlist", req)
+			}
+			if _, ok := req["performers"].([]any); !ok {
+				t.Errorf("scrape-pick performers = %v (%T), want an array", req["performers"], req["performers"])
+			}
+			if title == "Unknown Scene Here" {
+				enc(map[string]any{"status": "OK", "scene_id": 0, "wishlisted": false})
+				return
+			}
+			enc(map[string]any{"status": "OK", "scene_id": 5, "wishlisted": true,
+				"candidate": map[string]any{"scraper_id": "slr", "url": "https://sexlikereal.com/s/1"}})
+		case "/api/scene/toggle":
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode toggle: %v", err)
+			}
+			if req["scene_id"] != "slr-1" || req["list"] != "wishlist" {
+				t.Errorf("toggle body = %v, want scene_id+list", req)
+			}
+			enc(map[string]any{"status": "OK"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(srv.URL)
+}
+
+func TestSearchScenesHits(t *testing.T) {
+	got, err := wishlistStub(t).SearchScenes("francii luscious")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SceneID != "slr-1" {
+		t.Fatalf("search = %+v, want the slr-1 scene", got)
+	}
+}
+
+func TestGetSceneReadsFlags(t *testing.T) {
+	s, err := wishlistStub(t).GetScene(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Wishlist || s.Title != "First Titty Drop" {
+		t.Errorf("scene = %+v, want unwishlisted with title", s)
+	}
+}
+
+func TestScrapeSearchCandidates(t *testing.T) {
+	got, err := wishlistStub(t).ScrapeSearch("sexlikereal first titty drop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got[0].Preferred || got[0].ScraperName != "SexLikeReal" {
+		t.Fatalf("candidates = %+v, want the preferred slr hit", got)
+	}
+}
+
+func TestScrapePickTrustsRanking(t *testing.T) {
+	res, err := wishlistStub(t).ScrapePick("First Titty Drop", "SexLikeReal", nil, "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SceneID != 5 || !res.Wishlisted || res.Candidate.URL != "https://sexlikereal.com/s/1" {
+		t.Errorf("pick = %+v, want scene 5 wishlisted with candidate echo", res)
+	}
+}
+
+func TestScrapePickZeroMeansUnknown(t *testing.T) {
+	res, err := wishlistStub(t).ScrapePick("Unknown Scene Here", "No Site", nil, "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SceneID != 0 || res.Wishlisted {
+		t.Errorf("pick = %+v, want scene 0 not wishlisted", res)
+	}
+}
+
+func TestToggleWishlistPayload(t *testing.T) {
+	if err := wishlistStub(t).ToggleWishlist("slr-1"); err != nil {
+		t.Fatal(err)
 	}
 }
 
