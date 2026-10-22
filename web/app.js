@@ -93,7 +93,7 @@ function groupCard(g) {
   // to find other versions.
   return `<article class="group">
     <div class="group-head">${cover}<div><h2>${esc(g.title)}</h2>${wanted}${owned}
-    <button data-search-query="${esc(searchQuery(g.key))}" title="Show cached versions of this scene">Find versions</button>
+    <button data-search-query="${esc(searchQuery(g.key))}" title="Show cached versions of this scene">Show cached</button>
     ${wishlistButton(g)}<div class="wishlist-box"></div>
     </div></div>
     <table><thead><tr><th>Variant</th><th>Size</th><th>Published</th><th>Note</th><th></th></tr></thead>
@@ -247,13 +247,13 @@ function wishlistCard(it) {
     ${it.cover ? `<img class="cover" src="${esc(it.cover)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
     <div><h2>${esc(it.title)}</h2>
     <div class="wanted">${esc(it.site || '')}${who ? ` · ${esc(who)}` : ''}</div>
-    <button data-search-query="${esc(query)}" title="Show cached Emp groups for this scene">Find versions</button>
+    <button data-search-query="${esc(query)}" title="Show cached Emp groups for this scene">Show cached</button>
     </div></div>${known}</article>`;
 }
 
 // Only the refresh button on filtered results fires a Jackett query.
-// The search box and card buttons (Find versions, Search Emp) filter
-// the cached index, so browsing never causes tracker traffic.
+// The search box and the card buttons filter the cached index, so
+// browsing never causes tracker traffic.
 function filterCache(query) {
   statusNote = 'local cache only (no Jackett query)';
   navigate({ view: 'groups', q: query, page: 1 });
@@ -261,9 +261,13 @@ function filterCache(query) {
 
 async function liveRefresh(query, btn) {
   if (btn) btn.disabled = true;
+  // Two phases, two statuses: the Jackett query, then the groups
+  // rebuild (which can take a while on a cold cache). Never leave the
+  // first label up while the second phase runs.
   setStatus(`Refreshing from Jackett for “${query}”… (one query, results cached)`);
   try {
     const r = await fetchJSON(`/api/search?q=${encodeURIComponent(query)}`);
+    setStatus(`Search complete: ${r.results} result(s), ${r.new} new. Rebuilding groups…`);
     statusNote = `Search complete: ${r.results} result(s), ${r.new} new.`;
     navigate({ view: 'groups', q: query, page: 1 });
   } catch (e) {

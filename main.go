@@ -509,15 +509,23 @@ func enrichGroups(cfg *config.Config, wishlist []xbvr.WantedScene, owned match.L
 }
 
 // filterQuery keeps items matching every token of q (case-insensitive,
-// title and tags). Empty q keeps everything.
+// title and tags). Tokens and haystacks are folded the same way the
+// wishlist matcher folds them, so punctuation in a query ("Horror,")
+// never hides a title that reads the same ("Horror"). Empty q (or a q
+// of pure punctuation) keeps everything.
 func filterQuery(items []store.Item, q string) []store.Item {
-	toks := strings.Fields(strings.ToLower(q))
+	var toks []string
+	for _, t := range strings.Fields(strings.ToLower(q)) {
+		if n := nonAlnumRe.ReplaceAllString(t, ""); n != "" {
+			toks = append(toks, n)
+		}
+	}
 	if len(toks) == 0 {
 		return items
 	}
 	var out []store.Item
 	for _, it := range items {
-		hay := strings.ToLower(it.Title + " " + strings.Join(it.Tags, " "))
+		hay := nonAlnumRe.ReplaceAllString(strings.ToLower(it.Title+" "+strings.Join(it.Tags, " ")), "")
 		keep := true
 		for _, t := range toks {
 			if !strings.Contains(hay, t) {
@@ -589,12 +597,16 @@ func serveSearch(cfg *config.Config, db *store.DB, xc *xbvr.Client, w http.Respo
 		return
 	}
 	// One query per configured indexer path; group IDs dedupe the rest.
+	done := logStage(r, "request")
+	defer done()
 	seen := map[string]bool{}
 	var fresh []store.Item
 	results, failures := 0, 0
 	for _, path := range cfg.JackettTorznabPaths {
+		stop := logStage(r, "jackett")
 		jc := jackett.NewClient(cfg.JackettURL, cfg.JackettAPIKey, path)
 		items, err := jc.Search(q, emp.GroupIDFromURL)
+		stop()
 		if err != nil {
 			log.Printf("search %s: %v", path, err)
 			failures++
@@ -623,6 +635,7 @@ func serveSearch(cfg *config.Config, db *store.DB, xc *xbvr.Client, w http.Respo
 	if len(fresh) > 0 {
 		matchFresh(db, xc, fresh)
 	}
+	log.Printf("search %q: %d results, %d new", q, results, len(fresh))
 	writeJSON(w, map[string]any{"results": results, "new": len(fresh)})
 }
 

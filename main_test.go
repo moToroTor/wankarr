@@ -425,6 +425,30 @@ func TestFilterQuery(t *testing.T) {
 	}
 }
 
+// Punctuation folds on both sides: a queried "Horror," must not hide a
+// stored "Horror", and a bracketed site tag must not demand its
+// brackets in the stored title.
+func TestFilterQueryIgnoresPunctuation(t *testing.T) {
+	items := []store.Item{
+		{GroupID: "1", Title: "[sexlikereal.com/VRDome] Francii Luscious - First Titty Drop (Oculus 8K 4096p, 84mbps)"},
+	}
+	if got := filterQuery(items, "Rokky Horror, Sex Crazed Goth Rokky Horror"); len(got) != 0 {
+		t.Errorf("unrelated query = %+v, want none", got)
+	}
+	if got := filterQuery(items, "francii luscious - first titty drop"); len(got) != 1 {
+		t.Errorf("plain query = %+v, want the group", got)
+	}
+	if got := filterQuery(items, "[vrdome / sexlikereal] francii luscious"); len(got) != 1 {
+		t.Errorf("bracketed query = %+v, want the group despite different site tags", got)
+	}
+	if got := filterQuery(items, "titty, drop!"); len(got) != 1 {
+		t.Errorf("punctuated query = %+v, want the group", got)
+	}
+	if got := filterQuery(items, "!!!"); len(got) != 1 {
+		t.Errorf("punctuation-only query = %+v, want everything", got)
+	}
+}
+
 // The reported bug: a wishlist entry added AFTER the Emp rows were stored
 // never paired. matchAll must pair old rows with the current wishlist.
 func TestMatchAllPairsOldItems(t *testing.T) {
